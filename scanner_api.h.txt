@@ -1,0 +1,68 @@
+#pragma once
+
+#ifdef SCANNER_EXPORTS
+#define SCANNER_API __declspec(dllexport)
+#else
+#define SCANNER_API __declspec(dllimport)
+#endif
+
+#include <stdint.h>
+
+// 精简的文件记录（不含完整路径）
+#pragma pack(push, 1)
+struct FileRecord
+{
+    uint64_t ref;               // 文件引用号
+    uint64_t parent_ref;        // 父目录引用号
+    wchar_t filename[260];      // 文件名
+    uint32_t attributes;        // 属性
+};
+#pragma pack(pop)
+
+// 完整文件信息（用于返回给 Python）
+#pragma pack(push, 1)
+struct FileInfo
+{
+    wchar_t filename[260];
+    wchar_t fullpath[520];
+    int64_t size;
+    int64_t mtime;
+    int32_t is_dir;
+};
+#pragma pack(pop)
+
+typedef void (*ProgressCallback)(int64_t count, const wchar_t* current);
+
+extern "C"
+{
+    // 基础函数
+    SCANNER_API const char* get_version();
+
+    // 传统扫描
+    SCANNER_API int scan_directory(const wchar_t* path);
+    SCANNER_API double get_last_scan_time();
+
+    // MFT 扫描（新版：只读取，不构建路径）
+    SCANNER_API int64_t mft_scan_fast(const wchar_t* drive);
+    SCANNER_API double mft_get_scan_time();
+
+    // 获取记录
+    SCANNER_API int64_t mft_get_count();
+    SCANNER_API int32_t mft_get_records(FileRecord* buffer, int64_t offset, int32_t count);
+
+    // 按需构建单个路径
+    SCANNER_API int32_t mft_build_path(uint64_t ref, wchar_t* buffer, int32_t buffer_size);
+
+    // 搜索（在内存中搜索文件名）
+    SCANNER_API int64_t mft_search(const wchar_t* keyword, FileRecord* results, int32_t max_results);
+
+    // 清理
+    SCANNER_API void mft_clear();
+
+    // 旧版兼容
+    SCANNER_API int64_t scan_mft(const wchar_t* drive);
+    SCANNER_API int64_t get_file_count();
+    SCANNER_API int32_t get_files(FileInfo* buffer, int64_t offset, int32_t count);
+    SCANNER_API void clear_results();
+    SCANNER_API void set_progress_callback(ProgressCallback callback);
+}
