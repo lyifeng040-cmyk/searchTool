@@ -218,18 +218,9 @@ class SearchApp(QMainWindow):
 		self.index_mgr.fts_finished_signal.connect(self.on_fts_finished)
 
 		# 构建 UI（已拆分到 ui_builder）
-		try:
-			build_menubar(self)
-		except Exception:
-			self._build_menubar()
-		try:
-			build_ui(self)
-		except Exception:
-			self._build_ui()
-		try:
-			bind_shortcuts(self)
-		except Exception:
-			self._bind_shortcuts()
+		build_menubar(self)
+		build_ui(self)
+		bind_shortcuts(self)
 
 		# 初始化托盘和热键
 		self._init_tray_and_hotkey()
@@ -303,23 +294,9 @@ class SearchApp(QMainWindow):
 		if self.config_mgr.get_hotkey_enabled() and HAS_WIN32:
 			self.hotkey_mgr.start()
 
-	def _build_menubar(self):
-		# delegate to ui_builder
-		try:
-			build_menubar(self)
-		except Exception:
-			pass
-
-	def _build_ui(self):
-		# delegate to ui_builder
-		try:
-			build_ui(self)
-		except Exception:
-			pass
-
 	# Shortcuts are provided by `ui.components.ui_builder.bind_shortcuts`.
-	# The fallback implementation has been removed to keep the UI construction
-	# centralized in `ui_builder`.
+	# The fallback implementations for menu/ui construction have been removed
+	# — UI is now fully constructed by `ui_builder`.
 
 	def eventFilter(self, obj, event):
 		if obj == self.entry_kw and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Down:
