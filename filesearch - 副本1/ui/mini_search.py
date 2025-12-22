@@ -7,11 +7,9 @@ import os
 import shutil
 import subprocess
 import struct
-import html
-import re
 
-from PySide6.QtCore import Qt, QEvent, QObject, QRectF, QTimer
-from PySide6.QtGui import QFont, QColor, QTextDocument
+from PySide6.QtCore import Qt, QEvent, QObject
+from PySide6.QtGui import QFont, QColor
 from PySide6.QtWidgets import (
 	QApplication,
 	QDialog,
@@ -25,8 +23,6 @@ from PySide6.QtWidgets import (
 	QMessageBox,
 	QListWidget,
 	QListWidgetItem,
-	QStyledItemDelegate,
-	QStyle,
 )
 
 from ..constants import SKIP_DIRS_LOWER, ARCHIVE_EXTS
@@ -61,7 +57,6 @@ class MiniSearchWindow(QObject):
 		self.tip_frame = None
 		self.button_frame = None
 		self.ctx_menu = None
-		self._highlight_delegate = None
 
 	def show(self):
 		if self.window is not None:
@@ -168,9 +163,6 @@ class MiniSearchWindow(QObject):
 		self.result_listbox.setFont(QFont("微软雅黑", 12))
 		self.result_listbox.setMinimumHeight(300)
 		self.result_listbox.setAlternatingRowColors(False)
-		self.result_listbox.setFocusPolicy(Qt.StrongFocus)
-		self._highlight_delegate = KeywordHighlightDelegate(self.result_listbox)
-		self.result_listbox.setItemDelegate(self._highlight_delegate)
 		self.result_listbox.itemDoubleClicked.connect(self._on_open)
 		self.result_listbox.setContextMenuPolicy(Qt.CustomContextMenu)
 		self.result_listbox.customContextMenuRequested.connect(self._on_right_click)
@@ -236,7 +228,6 @@ class MiniSearchWindow(QObject):
 		if event.type() == QEvent.KeyPress:
 			key = event.key()
 			modifiers = event.modifiers()
-			# 按键处理
 
 			if key == Qt.Key_Escape:
 				self._on_close()
@@ -320,7 +311,7 @@ class MiniSearchWindow(QObject):
 			self.result_listbox.addItem(QListWidgetItem("   ⚠️ 搜索失败"))
 			return
 
-		self._display_results(results, keywords)
+		self._display_results(results)
 
 	def _search_realtime(self, keyword):
 		self.result_listbox.addItem(QListWidgetItem("   🔍 正在搜索..."))
@@ -354,12 +345,9 @@ class MiniSearchWindow(QObject):
 				continue
 
 		self.result_listbox.clear()
-		self._display_results(results, keywords)
+		self._display_results(results)
 
-	def _display_results(self, results, keywords=None):
-		keywords = keywords or []
-		if self._highlight_delegate:
-			self._highlight_delegate.set_keywords(keywords)
+	def _display_results(self, results):
 		if not results:
 			self.result_listbox.addItem(QListWidgetItem("   😔 未找到匹配的文件"))
 			return
@@ -505,82 +493,56 @@ class MiniSearchWindow(QObject):
 			logger.error(f"定位失败: {e}")
 
 	def _on_switch_to_main(self, event=None):
-		try:
-			keyword = self.search_entry.text().strip()
-			results_copy = list(self.results)
+		keyword = self.search_entry.text().strip()
+		results_copy = list(self.results)
 
-			# 从迷你窗口切换到主窗口
+		self.close()
 
-			self.close()
+		self.app.show()
+		self.app.showNormal()
+		self.app.raise_()
+		self.app.activateWindow()
 
-			# Ensure main window is restored/unminimized and brought to front
-			try:
-				self.app.show()
-				self.app.showNormal()
-				# clear minimized state if present
-				try:
-					state = int(self.app.windowState())
-					self.app.setWindowState(state & ~int(Qt.WindowMinimized))
-				except Exception:
-					pass
-				self.app.raise_()
-				self.app.activateWindow()
-			except Exception:
-				# ignore
-				pass
+		if keyword:
+			self.app.entry_kw.setText(keyword)
 
-			if keyword:
-				self.app.entry_kw.setText(keyword)
+			if results_copy:
+				with self.app.results_lock:
+					self.app.all_results.clear()
+					self.app.filtered_results.clear()
+					self.app.shown_paths.clear()
 
-				if results_copy:
-					with self.app.results_lock:
-						self.app.all_results.clear()
-						self.app.filtered_results.clear()
-						self.app.shown_paths.clear()
+					for item in results_copy:
+						ext = os.path.splitext(item["filename"])[1].lower()
+						if item["is_dir"]:
+							tc, ss = 0, "📂 文件夹"
+						elif ext in ARCHIVE_EXTS:
+							tc, ss = 1, "📦 压缩包"
+						else:
+							tc, ss = 2, format_size(item["size"])
 
-						for item in results_copy:
-							ext = os.path.splitext(item["filename"])[1].lower()
-							if item["is_dir"]:
-								tc, ss = 0, "📂 文件夹"
-							elif ext in ARCHIVE_EXTS:
-								tc, ss = 1, "📦 压缩包"
-							else:
-								tc, ss = 2, format_size(item["size"])
+						self.app.all_results.append({
+							"filename": item["filename"],
+							"fullpath": item["fullpath"],
+							"dir_path": os.path.dirname(item["fullpath"]),
+							"size": item["size"],
+							"mtime": item["mtime"],
+							"type_code": tc,
+							"size_str": ss,
+							"mtime_str": format_time(item["mtime"]),
+						})
+						self.app.shown_paths.add(item["fullpath"])
 
-							self.app.all_results.append({
-								"filename": item["filename"],
-								"fullpath": item["fullpath"],
-								"dir_path": os.path.dirname(item["fullpath"]),
-								"size": item["size"],
-								"mtime": item["mtime"],
-								"type_code": tc,
-								"size_str": ss,
-								"mtime_str": format_time(item["mtime"]),
-							})
-							self.app.shown_paths.add(item["fullpath"])
+					self.app.filtered_results = list(self.app.all_results)
+					self.app.total_found = len(self.app.all_results)
 
-						self.app.filtered_results = list(self.app.all_results)
-						self.app.total_found = len(self.app.all_results)
+				self.app.current_page = 1
+				self.app._update_ext_combo()
+				self.app._render_page()
+				self.app.status.setText(f"✅ 从迷你窗口导入 {len(results_copy)} 个结果")
+				self.app.btn_refresh.setEnabled(True)
 
-					self.app.current_page = 1
-					self.app._update_ext_combo()
-					# 通知主窗口 delegate 使用相同关键词进行高亮
-					try:
-						if getattr(self.app, "_main_highlight_delegate", None):
-							self.app._main_highlight_delegate.set_keywords([keyword.lower()])
-					except Exception:
-						pass
-					self.app._render_page()
-					self.app.status.setText(f"✅ 从迷你窗口导入 {len(results_copy)} 个结果")
-					self.app.btn_refresh.setEnabled(True)
-
-			# ensure entry gets focus (delay to let window manager update)
-			try:
-				QTimer.singleShot(50, lambda: (self.app.entry_kw.setFocus(), self.app.entry_kw.selectAll()))
-			except Exception:
-				self.app.entry_kw.setFocus()
-		except Exception:
-			logger.exception("_on_switch_to_main failed")
+		self.app.entry_kw.setFocus()
 
 	def _on_up(self, event=None):
 		if not self.results:
@@ -616,65 +578,6 @@ class MiniSearchWindow(QObject):
 				pass
 			self.window = None
 		self.results.clear()
-
-
-class KeywordHighlightDelegate(QStyledItemDelegate):
-	"""Draws QListWidget items while highlighting the current keywords."""
-
-	def __init__(self, parent=None):
-		super().__init__(parent)
-		self._pattern = None
-
-	def set_keywords(self, keywords):
-		terms = [kw for kw in keywords if kw]
-		if terms:
-			joined = "|".join(re.escape(term) for term in terms)
-			self._pattern = re.compile(joined, re.IGNORECASE)
-		else:
-			self._pattern = None
-		# 设置关键词模式（不输出调试日志）
-
-	def paint(self, painter, option, index):
-		painter.save()
-		bg_brush = index.data(Qt.BackgroundRole)
-		if bg_brush:
-			painter.fillRect(option.rect, bg_brush)
-		elif option.state & QStyle.State_Selected:
-			painter.fillRect(option.rect, option.palette.highlight())
-		else:
-			painter.fillRect(option.rect, option.palette.base())
-
-		text = index.data(Qt.DisplayRole) or ""
-		doc = QTextDocument()
-		doc.setDefaultFont(option.font)
-		doc.setDocumentMargin(0)
-		doc.setHtml(self._build_html(text, option))
-		doc.setTextWidth(option.rect.width())
-		painter.translate(option.rect.topLeft())
-		doc.drawContents(painter, QRectF(0, 0, option.rect.width(), option.rect.height()))
-		painter.restore()
-
-	def _build_html(self, text, option):
-		escaped = html.escape(text)
-		if not self._pattern:
-			return self._render_text(escaped, option)
-		# 检查是否能在文本中找到匹配
-		m = self._pattern.search(escaped)
-		# 使用与主窗口一致的浅黄色高亮
-		highlighted = self._pattern.sub(
-			lambda m: f'<span style="background-color:#fff176">{m.group(0)}</span>',
-			escaped,
-		)
-		return self._render_text(highlighted, option)
-
-	def _render_text(self, html_text, option):
-		is_selected = bool(option.state & QStyle.State_Selected)
-		color = (
-			option.palette.highlightedText().color().name()
-			if is_selected
-			else option.palette.text().color().name()
-		)
-		return f'<div style="color:{color};">{html_text}</div>'
 
 
 __all__ = ["MiniSearchWindow"]

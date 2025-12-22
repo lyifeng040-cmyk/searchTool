@@ -16,8 +16,8 @@ import threading
 import time
 from typing import List
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QSettings, QRectF
-from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextDocument
+from PySide6.QtCore import QEvent, Qt, QTimer, QSettings
+from PySide6.QtGui import QFont, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
 	QApplication,
 	QAbstractItemView,
@@ -42,11 +42,7 @@ from PySide6.QtWidgets import (
 	QWidget,
 	QFileDialog,
 	QMessageBox,
-	QStyledItemDelegate,
-	QStyle,
 )
-import html
-import re
 
 from ..config import ConfigManager
 from ..constants import IS_WINDOWS, SKIP_DIRS_LOWER
@@ -63,21 +59,11 @@ from ..core.mft_scanner import _batch_stat_files
 from ..core.file_watcher import UsnFileWatcher, _dir_cache_file
 from ..core.rust_engine import HAS_RUST_ENGINE, RUST_ENGINE, FileInfo
 from ..core.search_workers import IndexSearchWorker, RealtimeSearchWorker
-from .components.search_logic import create_worker
-from .components.file_operations import (
-	open_file as fo_open_file,
-	open_folder_and_select as fo_open_folder,
-	copy_paths_to_clipboard as fo_copy_paths,
-	copy_files_to_clipboard_win32 as fo_copy_files_win32,
-	delete_items as fo_delete_items,
-)
-from .components.ui_builder import build_menubar, build_ui, bind_shortcuts
 from .tray_manager import TrayManager
 from .hotkey_manager import HotkeyManager
 from .mini_search import MiniSearchWindow
 from .dialogs.cdrive_settings import CDriveSettingsDialog
 from .dialogs.batch_rename import BatchRenameDialog
-# component helpers moved incrementally; keep original methods in this file for now
 
 logger = logging.getLogger(__name__)
 
@@ -99,59 +85,6 @@ if HAS_SEND2TRASH:
 		send2trash = None
 else:
 	send2trash = None
-
-
-class MainHighlightDelegate(QStyledItemDelegate):
-	"""Delegate for main window file-name column highlighting."""
-
-	def __init__(self, app=None):
-		super().__init__(app)
-		self._pattern = None
-		self.app = app
-
-	def set_keywords(self, keywords):
-		terms = [kw for kw in keywords if kw]
-		if terms:
-			joined = "|".join(re.escape(term) for term in terms)
-			self._pattern = re.compile(joined, re.IGNORECASE)
-		else:
-			self._pattern = None
-		# 设置关键词模式（调试信息已移除）
-
-	def paint(self, painter, option, index):
-		painter.save()
-		# background
-		bg_brush = index.data(Qt.BackgroundRole)
-		if bg_brush:
-			painter.fillRect(option.rect, bg_brush)
-		elif option.state & QStyle.State_Selected:
-			painter.fillRect(option.rect, option.palette.highlight())
-		else:
-			painter.fillRect(option.rect, option.palette.base())
-
-		text = index.data(Qt.DisplayRole) or ""
-		doc = QTextDocument()
-		doc.setDefaultFont(option.font)
-		doc.setDocumentMargin(0)
-		doc.setHtml(self._build_html(text, option))
-		doc.setTextWidth(option.rect.width())
-		painter.translate(option.rect.topLeft())
-		doc.drawContents(painter, QRectF(0, 0, option.rect.width(), option.rect.height()))
-		painter.restore()
-
-	def _build_html(self, text, option):
-		escaped = html.escape(text)
-		if not self._pattern:
-			return f"<div style=\"color:{option.palette.text().color().name()}\">{escaped}</div>"
-		m = self._pattern.search(escaped)
-		highlighted = self._pattern.sub(
-			lambda m: f'<span style="background-color:#fff176">{m.group(0)}</span>',
-			escaped,
-		)
-		is_selected = bool(option.state & QStyle.State_Selected)
-		color = option.palette.highlightedText().color().name() if is_selected else option.palette.text().color().name()
-		return f'<div style="color:{color};">{highlighted}</div>'
-
 
 
 class SearchApp(QMainWindow):
@@ -217,19 +150,10 @@ class SearchApp(QMainWindow):
 		self.index_mgr.build_finished_signal.connect(self.on_build_finished)
 		self.index_mgr.fts_finished_signal.connect(self.on_fts_finished)
 
-		# 构建 UI（已拆分到 ui_builder）
-		try:
-			build_menubar(self)
-		except Exception:
-			self._build_menubar()
-		try:
-			build_ui(self)
-		except Exception:
-			self._build_ui()
-		try:
-			bind_shortcuts(self)
-		except Exception:
-			self._bind_shortcuts()
+		# 构建 UI
+		self._build_menubar()
+		self._build_ui()
+		self._bind_shortcuts()
 
 		# 初始化托盘和热键
 		self._init_tray_and_hotkey()
@@ -304,22 +228,340 @@ class SearchApp(QMainWindow):
 			self.hotkey_mgr.start()
 
 	def _build_menubar(self):
-		# delegate to ui_builder
-		try:
-			build_menubar(self)
-		except Exception:
-			pass
+		menubar = self.menuBar()
+
+		file_menu = menubar.addMenu("文件(&F)")
+		file_menu.addAction("📤 导出结果", self.export_results, QKeySequence("Ctrl+E"))
+		file_menu.addSeparator()
+		# 保留 Enter 给搜索，避免重复快捷键冲突
+		file_menu.addAction("📂 打开文件", self.open_file)
+		file_menu.addAction("🎯 定位文件", self.open_folder, QKeySequence("Ctrl+L"))
+		file_menu.addSeparator()
+		file_menu.addAction("🚪 退出", self._do_quit, QKeySequence("Alt+F4"))
+
+		edit_menu = menubar.addMenu("编辑(&E)")
+		edit_menu.addAction("✅ 全选", self.select_all, QKeySequence("Ctrl+A"))
+		edit_menu.addSeparator()
+		edit_menu.addAction("📋 复制路径", self.copy_path, QKeySequence("Ctrl+C"))
+		edit_menu.addAction("📄 复制文件", self.copy_file, QKeySequence("Ctrl+Shift+C"))
+		edit_menu.addSeparator()
+		edit_menu.addAction("🗑️ 删除", self.delete_file, QKeySequence("Delete"))
+
+		search_menu = menubar.addMenu("搜索(&S)")
+		search_menu.addAction("🔍 开始搜索", self.start_search, QKeySequence("Return"))
+		search_menu.addAction("🔄 刷新搜索", self.refresh_search, QKeySequence("F5"))
+		search_menu.addAction("⏹ 停止搜索", self.stop_search, QKeySequence("Escape"))
+
+		tool_menu = menubar.addMenu("工具(&T)")
+		tool_menu.addAction("📊 大文件扫描", self.scan_large_files, QKeySequence("Ctrl+G"))
+		tool_menu.addAction("✏ 批量重命名", self._show_batch_rename)
+		tool_menu.addSeparator()
+		tool_menu.addAction("🔧 索引管理", self._show_index_mgr)
+		tool_menu.addAction("🔄 重建索引", self._build_index)
+		tool_menu.addSeparator()
+		tool_menu.addAction("⚙️ 设置", self._show_settings)
+
+		self.fav_menu = menubar.addMenu("收藏(&B)")
+		self._update_favorites_menu()
+
+		help_menu = menubar.addMenu("帮助(&H)")
+		help_menu.addAction("⌨️ 快捷键列表", self._show_shortcuts)
+		help_menu.addSeparator()
+		help_menu.addAction("ℹ️ 关于", self._show_about)
 
 	def _build_ui(self):
-		# delegate to ui_builder
-		try:
-			build_ui(self)
-		except Exception:
-			pass
+		central = QWidget()
+		self.setCentralWidget(central)
+		root_layout = QVBoxLayout(central)
+		root_layout.setContentsMargins(10, 10, 10, 10)
+		root_layout.setSpacing(8)
 
-	# Shortcuts are provided by `ui.components.ui_builder.bind_shortcuts`.
-	# The fallback implementation has been removed to keep the UI construction
-	# centralized in `ui_builder`.
+		header = QFrame()
+		header_layout = QVBoxLayout(header)
+		header_layout.setContentsMargins(0, 0, 0, 0)
+		header_layout.setSpacing(8)
+
+		row0 = QHBoxLayout()
+		title_lbl = QLabel("⚡ 极速搜 V42")
+		title_lbl.setFont(QFont("微软雅黑", 18, QFont.Bold))
+		title_lbl.setStyleSheet("color: #4CAF50;")
+		row0.addWidget(title_lbl)
+
+		sub_lbl = QLabel("🎯 增强版")
+		sub_lbl.setFont(QFont("微软雅黑", 10))
+		sub_lbl.setStyleSheet("color: #FF9800;")
+		row0.addWidget(sub_lbl)
+
+		self.idx_lbl = QLabel("检查中...")
+		self.idx_lbl.setFont(QFont("微软雅黑", 9))
+		row0.addWidget(self.idx_lbl)
+		row0.addStretch()
+
+		btn_index_mgr = QPushButton("🔧 索引管理")
+		btn_index_mgr.setFixedWidth(100)
+		btn_index_mgr.clicked.connect(self._show_index_mgr)
+		row0.addWidget(btn_index_mgr)
+
+		btn_export = QPushButton("📤 导出")
+		btn_export.setFixedWidth(70)
+		btn_export.clicked.connect(self.export_results)
+		row0.addWidget(btn_export)
+
+		btn_big = QPushButton("📊 大文件")
+		btn_big.setFixedWidth(80)
+		btn_big.clicked.connect(self.scan_large_files)
+		row0.addWidget(btn_big)
+
+		theme_label = QLabel("主题:")
+		theme_label.setFont(QFont("微软雅黑", 9))
+		row0.addWidget(theme_label)
+
+		self.combo_theme = QComboBox()
+		self.combo_theme.addItems(["light", "dark"])
+		self.combo_theme.setCurrentText(self.config_mgr.get_theme())
+		self.combo_theme.currentTextChanged.connect(self._on_theme_change)
+		self.combo_theme.setFixedWidth(80)
+		row0.addWidget(self.combo_theme)
+
+		btn_c_drive = QPushButton("📂 C盘目录")
+		btn_c_drive.setFixedWidth(90)
+		btn_c_drive.clicked.connect(self._show_c_drive_settings)
+		row0.addWidget(btn_c_drive)
+
+		btn_batch = QPushButton("✏ 批量重命名")
+		btn_batch.setFixedWidth(100)
+		btn_batch.clicked.connect(self._show_batch_rename)
+		row0.addWidget(btn_batch)
+
+		btn_refresh_idx = QPushButton("🔄 立即同步")
+		btn_refresh_idx.setFixedWidth(90)
+		btn_refresh_idx.clicked.connect(self.sync_now)
+		row0.addWidget(btn_refresh_idx)
+
+		header_layout.addLayout(row0)
+
+		row1 = QHBoxLayout()
+
+		self.combo_fav = QComboBox()
+		self._update_fav_combo()
+		self.combo_fav.setFixedWidth(110)
+		self.combo_fav.currentIndexChanged.connect(self._on_fav_combo_select)
+		row1.addWidget(self.combo_fav)
+
+		self.combo_scope = QComboBox()
+		self._update_drives()
+		self.combo_scope.setFixedWidth(180)
+		self.combo_scope.currentIndexChanged.connect(self._on_scope_change)
+		row1.addWidget(self.combo_scope)
+
+		btn_browse = QPushButton("📂 选择目录")
+		btn_browse.setFixedWidth(90)
+		btn_browse.clicked.connect(self._browse)
+		row1.addWidget(btn_browse)
+
+		self.entry_kw = QLineEdit()
+		self.entry_kw.setFont(QFont("微软雅黑", 12))
+		self.entry_kw.setPlaceholderText("请输入搜索关键词...")
+		self.entry_kw.returnPressed.connect(self.start_search)
+		row1.addWidget(self.entry_kw, 1)
+
+		self.chk_fuzzy = QCheckBox("模糊")
+		self.chk_fuzzy.setChecked(self.fuzzy_var)
+		self.chk_fuzzy.stateChanged.connect(lambda s: setattr(self, "fuzzy_var", bool(s)))
+		row1.addWidget(self.chk_fuzzy)
+
+		self.chk_regex = QCheckBox("正则")
+		self.chk_regex.setChecked(self.regex_var)
+		self.chk_regex.stateChanged.connect(lambda s: setattr(self, "regex_var", bool(s)))
+		row1.addWidget(self.chk_regex)
+
+		self.chk_realtime = QCheckBox("实时")
+		self.chk_realtime.setChecked(self.force_realtime)
+		self.chk_realtime.stateChanged.connect(lambda s: setattr(self, "force_realtime", bool(s)))
+		row1.addWidget(self.chk_realtime)
+
+		self.btn_search = QPushButton("🚀 搜索")
+		self.btn_search.setFixedWidth(90)
+		self.btn_search.clicked.connect(self.start_search)
+		row1.addWidget(self.btn_search)
+
+		self.btn_refresh = QPushButton("🔄 刷新")
+		self.btn_refresh.setFixedWidth(80)
+		self.btn_refresh.clicked.connect(self.refresh_search)
+		self.btn_refresh.setEnabled(False)
+		row1.addWidget(self.btn_refresh)
+
+		self.btn_pause = QPushButton("⏸ 暂停")
+		self.btn_pause.setFixedWidth(80)
+		self.btn_pause.clicked.connect(self.toggle_pause)
+		self.btn_pause.setEnabled(False)
+		row1.addWidget(self.btn_pause)
+
+		self.btn_stop = QPushButton("⏹ 停止")
+		self.btn_stop.setFixedWidth(80)
+		self.btn_stop.clicked.connect(self.stop_search)
+		self.btn_stop.setEnabled(False)
+		row1.addWidget(self.btn_stop)
+
+		header_layout.addLayout(row1)
+
+		row2 = QHBoxLayout()
+		row2.addWidget(QLabel("筛选:"))
+
+		row2.addWidget(QLabel("格式"))
+		self.ext_var = QComboBox()
+		self.ext_var.addItem("全部")
+		self.ext_var.currentIndexChanged.connect(lambda i: self._apply_filter())
+		self.ext_var.setFixedWidth(150)
+		row2.addWidget(self.ext_var)
+
+		row2.addWidget(QLabel("大小"))
+		self.size_var = QComboBox()
+		self.size_var.addItems(["不限", ">1MB", ">10MB", ">100MB", ">500MB", ">1GB"])
+		self.size_var.currentIndexChanged.connect(lambda i: self._apply_filter())
+		self.size_var.setFixedWidth(100)
+		row2.addWidget(self.size_var)
+
+		row2.addWidget(QLabel("时间"))
+		self.date_var = QComboBox()
+		self.date_var.addItems(["不限", "今天", "3天内", "7天内", "30天内", "今年"])
+		self.date_var.currentIndexChanged.connect(lambda i: self._apply_filter())
+		self.date_var.setFixedWidth(100)
+		row2.addWidget(self.date_var)
+
+		btn_clear_filter = QPushButton("清除")
+		btn_clear_filter.setFixedWidth(60)
+		btn_clear_filter.clicked.connect(self._clear_filter)
+		row2.addWidget(btn_clear_filter)
+
+		row2.addStretch()
+		self.lbl_filter = QLabel("")
+		self.lbl_filter.setFont(QFont("微软雅黑", 9))
+		self.lbl_filter.setStyleSheet("color: #666;")
+		row2.addWidget(self.lbl_filter)
+
+		header_layout.addLayout(row2)
+		root_layout.addWidget(header)
+
+		body = QFrame()
+		body_layout = QVBoxLayout(body)
+		body_layout.setContentsMargins(0, 0, 0, 0)
+		body_layout.setSpacing(0)
+
+		self.tree = QTreeWidget()
+		self.tree.setColumnCount(4)
+		self.tree.setHeaderLabels(["📄 文件名", "📂 所在目录", "📊 大小/类型", "🕒 修改时间"])
+		self.tree.setRootIsDecorated(False)
+		self.tree.setAlternatingRowColors(True)
+		self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.tree.itemDoubleClicked.connect(self.on_dblclick)
+		self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
+		self.tree.customContextMenuRequested.connect(self.show_menu)
+		self.tree.setStyleSheet(
+			"""
+			QTreeWidget {
+				alternate-background-color: #f8f9fa;
+				background-color: #ffffff;
+			}
+			QTreeWidget::item { padding: 2px; }
+			QTreeWidget::item:selected { background-color: #0078d4; color: white; }
+		"""
+		)
+
+		header_view = self.tree.header()
+		header_view.setSortIndicatorShown(True)
+		header_view.setSectionsClickable(True)
+		header_view.sectionClicked.connect(self.sort_column)
+		header_view.setStretchLastSection(False)
+		header_view.setSectionResizeMode(0, QHeaderView.Interactive)
+		header_view.setSectionResizeMode(1, QHeaderView.Interactive)
+		header_view.setSectionResizeMode(2, QHeaderView.Interactive)
+		header_view.setSectionResizeMode(3, QHeaderView.Interactive)
+		header_view.sectionResized.connect(self._on_section_resized)
+		self._apply_saved_column_widths()
+
+		body_layout.addWidget(self.tree)
+
+		pg = QFrame()
+		pg_layout = QHBoxLayout(pg)
+		pg_layout.setContentsMargins(5, 5, 5, 5)
+		pg_layout.setSpacing(5)
+		pg_layout.addStretch()
+
+		self.btn_first = QPushButton("⏮")
+		self.btn_first.setEnabled(False)
+		self.btn_first.clicked.connect(lambda: self.go_page("first"))
+		pg_layout.addWidget(self.btn_first)
+
+		self.btn_prev = QPushButton("◀")
+		self.btn_prev.setEnabled(False)
+		self.btn_prev.clicked.connect(lambda: self.go_page("prev"))
+		pg_layout.addWidget(self.btn_prev)
+
+		self.lbl_page = QLabel("第 1/1 页 (0项)")
+		self.lbl_page.setFont(QFont("微软雅黑", 9))
+		pg_layout.addWidget(self.lbl_page)
+
+		self.btn_next = QPushButton("▶")
+		self.btn_next.setEnabled(False)
+		self.btn_next.clicked.connect(lambda: self.go_page("next"))
+		pg_layout.addWidget(self.btn_next)
+
+		self.btn_last = QPushButton("⏭")
+		self.btn_last.setEnabled(False)
+		self.btn_last.clicked.connect(lambda: self.go_page("last"))
+		pg_layout.addWidget(self.btn_last)
+
+		common_style = (
+			"""
+			QPushButton { border: 1px solid #cbd5e0; border-radius: 7px; background: #ffffff; color: #1a202c; }
+			QPushButton:hover { background: #edf2f7; }
+			QPushButton:pressed { background: #e2e8f0; }
+			QPushButton:disabled { color: #a0aec0; background: #f7fafc; }
+		"""
+		)
+		for b in (self.btn_first, self.btn_prev, self.btn_next, self.btn_last):
+			b.setFixedHeight(30)
+			b.setFont(QFont("微软雅黑", 12, QFont.Bold))
+			b.setStyleSheet(common_style)
+		self.btn_prev.setFixedWidth(56)
+		self.btn_next.setFixedWidth(56)
+		self.btn_first.setFixedWidth(44)
+		self.btn_last.setFixedWidth(44)
+
+		pg_layout.addStretch()
+		body_layout.addWidget(pg)
+
+		root_layout.addWidget(body, 1)
+
+		self.status = QLabel("就绪")
+		self.status_path = QLabel("")
+		self.status_path.setFont(QFont("Consolas", 8))
+		self.status_path.setStyleSheet("color: #718096;")
+
+		self.progress = QProgressBar()
+		self.progress.setMaximumWidth(200)
+		self.progress.setVisible(False)
+		self.progress.setRange(0, 0)
+
+		statusbar = QStatusBar()
+		statusbar.addWidget(self.status, 1)
+		statusbar.addWidget(self.status_path, 3)
+		statusbar.addPermanentWidget(self.progress, 0)
+		self.setStatusBar(statusbar)
+
+	def _bind_shortcuts(self):
+		QShortcut(QKeySequence("Ctrl+F"), self, lambda: self.entry_kw.setFocus())
+		QShortcut(QKeySequence("Ctrl+A"), self, self.select_all)
+		QShortcut(QKeySequence("Ctrl+C"), self, self.copy_path)
+		QShortcut(QKeySequence("Ctrl+Shift+C"), self, self.copy_file)
+		QShortcut(QKeySequence("Ctrl+E"), self, self.export_results)
+		QShortcut(QKeySequence("Ctrl+G"), self, self.scan_large_files)
+		QShortcut(QKeySequence("Ctrl+L"), self, self.open_folder)
+		QShortcut(QKeySequence("F5"), self, self.refresh_search)
+		QShortcut(QKeySequence("Delete"), self, self.delete_file)
+		QShortcut(QKeySequence("Escape"), self, lambda: self.stop_search() if self.is_searching else self.entry_kw.clear())
+		self.entry_kw.installEventFilter(self)
 
 	def eventFilter(self, obj, event):
 		if obj == self.entry_kw and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Down:
@@ -1122,14 +1364,6 @@ class SearchApp(QMainWindow):
 			self.filtered_results.clear()
 			self.shown_paths.clear()
 
-		# 通知高亮 delegate 当前关键词
-		try:
-			if getattr(self, "_main_highlight_delegate", None):
-				keywords = kw.lower().split()
-				self._main_highlight_delegate.set_keywords(keywords)
-		except Exception:
-			pass
-
 		self.is_searching = True
 		self.stop_event = False
 		self.btn_search.setEnabled(False)
@@ -1140,13 +1374,15 @@ class SearchApp(QMainWindow):
 		self.status.setText("🔍 搜索中...")
 
 		scope_targets = self._get_search_scope_targets()
-		self.status.setText("⚡ 索引搜索..." if not self.force_realtime else "🔍 实时扫描...")
-		self.worker, is_realtime = create_worker(self.index_mgr, kw, scope_targets, self.regex_var, self.fuzzy_var, self.force_realtime)
-		if is_realtime:
-			try:
-				self.worker.progress.connect(self.on_rt_progress)
-			except Exception:
-				pass
+		use_idx = not self.force_realtime and self.index_mgr.is_ready and not self.index_mgr.is_building
+
+		if use_idx:
+			self.status.setText("⚡ 索引搜索...")
+			self.worker = IndexSearchWorker(self.index_mgr, kw, scope_targets, self.regex_var, self.fuzzy_var)
+		else:
+			self.status.setText("🔍 实时扫描...")
+			self.worker = RealtimeSearchWorker(kw, scope_targets, self.regex_var, self.fuzzy_var)
+			self.worker.progress.connect(self.on_rt_progress)
 
 		self.worker.batch_ready.connect(self.on_batch_ready)
 		self.worker.finished.connect(self.on_search_finished)
@@ -1290,7 +1526,7 @@ class SearchApp(QMainWindow):
 		item = self._get_sel()
 		if item:
 			try:
-				fo_open_file(item["fullpath"])
+				os.startfile(item["fullpath"])
 			except Exception as e:  # noqa: BLE001
 				logger.error(f"打开文件失败: {e}")
 				QMessageBox.warning(self, "错误", f"无法打开文件: {e}")
@@ -1299,7 +1535,7 @@ class SearchApp(QMainWindow):
 		item = self._get_sel()
 		if item:
 			try:
-				fo_open_folder(item["fullpath"])
+				subprocess.Popen(f'explorer /select,"{item["fullpath"]}"')
 			except Exception as e:  # noqa: BLE001
 				logger.error(f"定位文件失败: {e}")
 				QMessageBox.warning(self, "错误", f"无法定位文件: {e}")
@@ -1307,27 +1543,27 @@ class SearchApp(QMainWindow):
 	def copy_path(self):
 		items = self._get_selected_items()
 		if items:
-			paths = [item["fullpath"] for item in items]
-			try:
-				fo_copy_paths(QApplication, paths)
-				self.status.setText(f"已复制 {len(items)} 个路径")
-			except Exception:
-				# fallback to direct clipboard
-				QApplication.clipboard().setText("\n".join(paths))
-				self.status.setText(f"已复制 {len(items)} 个路径")
+			paths = "\n".join(item["fullpath"] for item in items)
+			QApplication.clipboard().setText(paths)
+			self.status.setText(f"已复制 {len(items)} 个路径")
 
 	def copy_file(self):
-		if not HAS_WIN32:
-			QMessageBox.warning(self, "提示", "需要在 Windows 上使用此功能")
+		if not HAS_WIN32 or not win32clipboard or not win32con:
+			QMessageBox.warning(self, "提示", "需要安装 pywin32: pip install pywin32")
 			return
 		items = self._get_selected_items()
 		if not items:
 			return
-		files = [item["fullpath"] for item in items if os.path.exists(item["fullpath"]) ]
-		if not files:
-			return
 		try:
-			fo_copy_files_win32(files)
+			files = [os.path.abspath(item["fullpath"]) for item in items if os.path.exists(item["fullpath"])]
+			if not files:
+				return
+			file_str = "\0".join(files) + "\0\0"
+			data = struct.pack("IIIII", 20, 0, 0, 0, 1) + file_str.encode("utf-16le")
+			win32clipboard.OpenClipboard()
+			win32clipboard.EmptyClipboard()
+			win32clipboard.SetClipboardData(win32con.CF_HDROP, data)
+			win32clipboard.CloseClipboard()
 			self.status.setText(f"已复制 {len(files)} 个文件")
 		except Exception as e:  # noqa: BLE001
 			logger.error(f"复制文件失败: {e}")
@@ -1351,8 +1587,31 @@ class SearchApp(QMainWindow):
 		if QMessageBox.question(self, "确认", msg, QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
 			return
 
-		# Delegate deletion to helper
-		deleted, failed, remove_exact, remove_prefix = fo_delete_items(items, use_send2trash=HAS_SEND2TRASH)
+		deleted = 0
+		failed = []
+		remove_exact = set()
+		remove_prefix = []
+
+		for item in items:
+			fp = os.path.normpath(item["fullpath"])
+			remove_exact.add(fp)
+			if item.get("type_code") == 0 or item.get("is_dir") == 1:
+				prefix = fp.rstrip("\\/") + os.sep
+				remove_prefix.append(prefix)
+
+		for item in items:
+			try:
+				if HAS_SEND2TRASH and send2trash:
+					send2trash.send2trash(item["fullpath"])
+				else:
+					if item.get("type_code") == 0 or item.get("is_dir") == 1:
+						shutil.rmtree(item["fullpath"])
+					else:
+						os.remove(item["fullpath"])
+				deleted += 1
+			except Exception as e:  # noqa: BLE001
+				logger.error(f"删除失败: {item['fullpath']} - {e}")
+				failed.append(item["filename"])
 
 		with self.results_lock:
 			for p in list(self.shown_paths):
@@ -1812,4 +2071,3 @@ def main():
 
 
 __all__ = ["SearchApp", "main"]
-
