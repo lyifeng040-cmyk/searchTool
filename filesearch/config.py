@@ -35,10 +35,18 @@ class ConfigManager:
         return {
             "search_history": [],
             "favorites": [],
+            "saved_searches": [],
             "theme": "light",
+            # search tuning defaults (removed from top-level config; advanced settings hidden)
+            "auto_mode": True,
+            # simple 'Everything'-like substring search mode (default True)
+            "simple_search_mode": True,
             "c_scan_paths": {"paths": [], "initialized": False},
             "enable_global_hotkey": True,
             "minimize_to_tray": True,
+            "auto_mode_prompt_disabled": False,
+            # pagination / UI
+            "results_page_size": 200,
         }
 
     def save(self):
@@ -144,6 +152,66 @@ class ConfigManager:
 
     def set_tray_enabled(self, enabled):
         self.config["minimize_to_tray"] = enabled
+        self.save()
+
+    # ---------- search tuning helpers (backwards-compatible defaults) ----------
+    def get_search_tuning_defaults(self):
+        # Return runtime defaults for search tuning values. Persistence has been
+        # deprecated and advanced settings are hidden by default.
+        return {
+            "sensitivity": 1.0,
+            "threshold": 0,
+            "weight_filename": 2.0,
+            "weight_dir": 1.0,
+        }
+
+    def get_search_auto_mode(self):
+        return bool(self.config.get("auto_mode", True))
+
+    def set_search_auto_mode(self, enabled: bool):
+        self.config["auto_mode"] = bool(enabled)
+        self.save()
+
+    def get_search_simple_mode(self) -> bool:
+        return bool(self.config.get("simple_search_mode", True))
+
+    def set_search_simple_mode(self, enabled: bool):
+        self.config["simple_search_mode"] = bool(enabled)
+        self.save()
+
+    def get_auto_mode_prompt_disabled(self) -> bool:
+        return bool(self.config.get("auto_mode_prompt_disabled", False))
+
+    def set_auto_mode_prompt_disabled(self, disabled: bool):
+        self.config["auto_mode_prompt_disabled"] = bool(disabled)
+        self.save()
+
+    # ---------- pagination helpers ----------
+    def get_results_page_size(self) -> int:
+        try:
+            v = int(self.config.get("results_page_size", 200))
+            return v if v > 0 else 200
+        except Exception:
+            return 200
+
+    def set_results_page_size(self, size: int):
+        try:
+            s = int(size)
+            if s <= 0:
+                return
+            self.config["results_page_size"] = s
+            self.save()
+        except Exception:
+            return
+    # Deprecated: tuning persistence removed to simplify UI. Methods kept minimal.
+
+    def get_saved_searches(self):
+        """获取保存的搜索条件列表"""
+        return self.config.get("saved_searches", [])
+
+    def set_saved_searches(self, searches):
+        """保存搜索条件列表"""
+        self.config["saved_searches"] = searches
         self.save()
 
 

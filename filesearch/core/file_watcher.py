@@ -303,6 +303,42 @@ class UsnFileWatcher(QObject):
 
 			self.index_mgr.force_reload_stats()
 
+			# 异步触发对新/修改文件的 content_fts 递增更新（限速并行）
+			def _bg_update(paths):
+				try:
+					import concurrent.futures
+					max_workers = 3
+					with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+						futures = []
+						for p in paths:
+							# only files (not directories) and existing paths
+							try:
+								if os.path.exists(p) and os.path.isfile(p):
+									futures.append(ex.submit(self.index_mgr.update_content_for_path, p))
+							except Exception:
+								continue
+						for f in futures:
+							try:
+								f.result()
+							except Exception:
+								pass
+				except Exception as e:
+					logger.debug(f"bg update error: {e}")
+
+			# 收集要更新内容索引的文件路径（排除目录）
+			update_paths = []
+			for item in inserts:
+				if isinstance(item, tuple) and len(item) >= 3:
+					fp = item[2]
+					try:
+						if os.path.exists(fp) and os.path.isfile(fp):
+							update_paths.append(fp)
+					except Exception:
+						continue
+
+			if update_paths:
+				threading.Thread(target=_bg_update, args=(update_paths,), daemon=True).start()
+
 			logger.info(f"[USN监控] 更新完成: +{len(inserts)} -{len(deletes)}")
 			self.files_changed.emit(len(inserts), len(deletes), list(deletes))
 

@@ -26,6 +26,25 @@ class FileInfo(ctypes.Structure):
     ]
 
 
+class SearchItemFFI(ctypes.Structure):
+    _fields_ = [
+        ("name_ptr", ctypes.POINTER(ctypes.c_uint8)),
+        ("name_len", ctypes.c_size_t),
+        ("path_ptr", ctypes.POINTER(ctypes.c_uint8)),
+        ("path_len", ctypes.c_size_t),
+        ("size", ctypes.c_uint64),
+        ("is_dir", ctypes.c_uint8),
+        ("mtime", ctypes.c_double),
+    ]
+
+
+class SearchResultFFI(ctypes.Structure):
+    _fields_ = [
+        ("items", ctypes.POINTER(SearchItemFFI)),
+        ("count", ctypes.c_size_t),
+    ]
+
+
 HAS_RUST_ENGINE = False
 RUST_ENGINE = None
 
@@ -56,6 +75,41 @@ def _configure_engine(eng):
         ctypes.c_size_t,
     ]
     eng.get_file_info_batch.restype = ctypes.c_size_t
+
+    # 搜索索引函数
+    eng.init_search_index.argtypes = [ctypes.c_uint16]
+    eng.init_search_index.restype = ctypes.c_int32
+
+    eng.search_prefix.argtypes = [ctypes.c_uint16, ctypes.c_char_p, ctypes.c_size_t]
+    eng.search_prefix.restype = ctypes.POINTER(SearchResultFFI)
+
+    eng.search_contains.argtypes = [ctypes.c_uint16, ctypes.c_char_p, ctypes.c_size_t]
+    eng.search_contains.restype = ctypes.POINTER(SearchResultFFI)
+
+    eng.search_by_ext.argtypes = [ctypes.c_uint16, ctypes.c_char_p, ctypes.c_size_t]
+    eng.search_by_ext.restype = ctypes.POINTER(SearchResultFFI)
+
+    # 新增：按修改时间范围搜索
+    try:
+        eng.search_by_mtime_range.argtypes = [
+            ctypes.c_uint16,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_size_t,
+        ]
+        eng.search_by_mtime_range.restype = ctypes.POINTER(SearchResultFFI)
+    except AttributeError:
+        # 旧版 DLL 不包含该函数，保持兼容
+        pass
+
+    eng.free_search_result.argtypes = [ctypes.POINTER(SearchResultFFI)]
+    eng.free_search_result.restype = None
+
+    eng.save_search_index.argtypes = [ctypes.c_uint16]
+    eng.save_search_index.restype = ctypes.c_int32
+
+    eng.load_search_index.argtypes = [ctypes.c_uint16]
+    eng.load_search_index.restype = ctypes.c_int32
 
 
 def load_rust_engine():
@@ -122,4 +176,6 @@ __all__ = [
     "is_rust_available",
     "ScanResult",
     "FileInfo",
+    "SearchItemFFI",
+    "SearchResultFFI",
 ]

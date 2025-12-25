@@ -132,27 +132,7 @@ def parse_search_scope(scope_str, get_drives_fn, config_mgr=None):
     return targets
 
 
-def fuzzy_match(keyword, filename):
-    """Fuzzy match score (higher is better)."""
-    keyword = keyword.lower()
-    filename_lower = filename.lower()
-
-    if keyword in filename_lower:
-        return 100
-
-    ki = 0
-    for char in filename_lower:
-        if ki < len(keyword) and char == keyword[ki]:
-            ki += 1
-    if ki == len(keyword):
-        return 60 + ki * 5
-
-    words = re.split(r"[\s\-_.]", filename_lower)
-    initials = "".join(w[0] for w in words if w)
-    if keyword in initials:
-        return 50
-
-    return 0
+# Note: scoring utilities removed from renderer — search now uses precise substring/regex matching only.
 
 
 def apply_theme(app, theme_name):
@@ -188,6 +168,172 @@ def apply_theme(app, theme_name):
         )
 
 
+### Boolean expression / predicate utilities for advanced search
+def _tokenize_search_expr(s: str):
+    import re
+    tokens = []
+    # Handle quoted phrases
+    pattern = re.compile(r'"([^"]+)"|(\()|(\))|(\|)|(!)|([^\s()|!]+)')
+    for m in pattern.finditer(s):
+        grp = m.group(0)
+        if grp is None:
+            continue
+        tokens.append(grp)
+    return tokens
+
+
+def compile_search_predicate(expr: str):
+    """Compile a boolean search expression into a predicate function.
+
+    Supports: parentheses, ! (NOT), | (OR), implicit AND (space).
+    Tokens may contain wildcards (*, ?) which are converted to regex.
+    If a token starts with 're:' the remainder is treated as a raw regex.
+    Returns a callable f(text)->bool
+    """
+    import re
+
+    def token_to_func(tok: str):
+        tok = tok.strip()
+        if not tok:
+            return lambda t: True
+        if tok.lower().startswith('re:'):
+            pat = tok.split(':', 1)[1]
+            try:
+                cre = re.compile(pat, re.IGNORECASE)
+            except re.error:
+                cre = re.compile(re.escape(pat), re.IGNORECASE)
+            return lambda text: bool(cre.search(text))
+        # quoted phrase
+        if tok.startswith('"') and tok.endswith('"'):
+            phrase = tok[1:-1]
+            return lambda text: phrase.lower() in text.lower()
+        # wildcard -> regex
+        if '*' in tok or '?' in tok:
+            esc = re.escape(tok)
+            esc = esc.replace(r'\*', '.*').replace(r'\?', '.')
+            try:
+                cre = re.compile(esc, re.IGNORECASE)
+            except re.error:
+                cre = re.compile(re.escape(tok), re.IGNORECASE)
+            return lambda text: bool(cre.search(text))
+        # plain token
+        return lambda text: tok.lower() in text.lower()
+
+    # shunting-yard to RPN
+    def precedence(op):
+        if op == '!':
+            return 3
+        if op == 'AND':
+            return 2
+        if op == 'OR' or op == '|':
+            return 1
+        return 0
+
+    toks = []
+    # simple tokenizer: split but keep parentheses and |
+    cur = ''
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c.isspace():
+            if cur:
+                toks.append(cur)
+                cur = ''
+            i += 1
+            continue
+        if c in '()|!':
+            if cur:
+                toks.append(cur)
+                cur = ''
+            toks.append(c)
+            i += 1
+            continue
+        if c == '"':
+            # quoted phrase
+            j = i + 1
+            while j < len(expr) and expr[j] != '"':
+                j += 1
+            phrase = expr[i:j+1] if j < len(expr) else expr[i:]
+            toks.append(phrase)
+            i = j + 1
+            continue
+        cur += c
+        i += 1
+    if cur:
+        toks.append(cur)
+
+    # convert implicit spaces to AND operators
+    out = []
+    prev_was_token = False
+    for t in toks:
+        if t == '|' or t == '|' or t == 'OR':
+            out.append('OR')
+            prev_was_token = False
+            continue
+        if t == '!':
+            out.append('!')
+            prev_was_token = False
+            continue
+        if t == '(':
+            out.append(t)
+            prev_was_token = False
+            continue
+        if t == ')':
+            out.append(t)
+            prev_was_token = True
+            continue
+        # token
+        if prev_was_token:
+            out.append('AND')
+        out.append(t)
+        prev_was_token = True
+
+    # to RPN
+    output_q = []
+    op_stack = []
+    for tok in out:
+        if tok == 'AND' or tok == 'OR' or tok == '!':
+            while op_stack and op_stack[-1] != '(' and precedence(op_stack[-1]) >= precedence(tok):
+                output_q.append(op_stack.pop())
+            op_stack.append(tok)
+        elif tok == '(':
+            op_stack.append(tok)
+        elif tok == ')':
+            while op_stack and op_stack[-1] != '(':
+                output_q.append(op_stack.pop())
+            if op_stack and op_stack[-1] == '(':
+                op_stack.pop()
+        else:
+            output_q.append(tok)
+    while op_stack:
+        output_q.append(op_stack.pop())
+
+    # build predicate from RPN
+    def build_from_rpn(rpn):
+        stack = []
+        for tok in rpn:
+            if tok == 'AND':
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(lambda text, a=a, b=b: a(text) and b(text))
+            elif tok == 'OR':
+                b = stack.pop()
+                a = stack.pop()
+                stack.append(lambda text, a=a, b=b: a(text) or b(text))
+            elif tok == '!':
+                a = stack.pop()
+                stack.append(lambda text, a=a: not a(text))
+            else:
+                stack.append(token_to_func(tok))
+        if not stack:
+            return lambda text: True
+        return stack[0]
+
+    pred = build_from_rpn(output_q)
+    # predicate expects a single text (we'll pass filename + '\n' + fullpath)
+    return pred
+
+
 __all__ = [
     "get_c_scan_dirs",
     "is_in_allowed_paths",
@@ -196,6 +342,5 @@ __all__ = [
     "format_size",
     "format_time",
     "parse_search_scope",
-    "fuzzy_match",
     "apply_theme",
 ]

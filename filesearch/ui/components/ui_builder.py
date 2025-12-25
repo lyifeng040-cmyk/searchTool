@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QTextEdit,
+    QSpinBox,
 )
+from PySide6.QtWidgets import QSpinBox as _QSPINBOX_GUARD
 from PySide6.QtGui import QFont, QShortcut
 from PySide6.QtCore import QTimer, Qt
 
@@ -45,13 +47,23 @@ def build_menubar(main):
     edit_menu.addAction("🗑️ 删除", main.delete_file, QKeySequence("Delete"))
 
     search_menu = menubar.addMenu("搜索(&S)")
-    search_menu.addAction("🔍 开始搜索", main.start_search, QKeySequence("Return"))
+    # Avoid binding Return here to prevent duplicate activations
+    search_menu.addAction("🔍 开始搜索", main.start_search)
     search_menu.addAction("🔄 刷新搜索", main.refresh_search, QKeySequence("F5"))
     search_menu.addAction("⏹ 停止搜索", main.stop_search, QKeySequence("Escape"))
+    search_menu.addSeparator()
+    search_menu.addAction("💾 保存的搜索", main._show_saved_searches, QKeySequence("Ctrl+S"))
+    search_menu.addAction("❓ 搜索语法帮助", main._show_search_syntax_help, QKeySequence("F1"))
 
     tool_menu = menubar.addMenu("工具(&T)")
     tool_menu.addAction("📊 大文件扫描", main.scan_large_files, QKeySequence("Ctrl+G"))
     tool_menu.addAction("✏ 批量重命名", main._show_batch_rename)
+    tool_menu.addSeparator()
+    tool_menu.addAction("🔍 重复文件查找", main._show_duplicate_finder)
+    tool_menu.addAction("🔐 计算文件 Hash", main._show_file_hash_calculator)
+    tool_menu.addSeparator()
+    tool_menu.addAction("📋 剪贴板历史", main._show_clipboard_history, QKeySequence("Ctrl+Shift+V"))
+    tool_menu.addAction("🏷 标签管理", main._show_tag_manager, QKeySequence("Ctrl+T"))
     tool_menu.addSeparator()
     tool_menu.addAction("🔧 索引管理", main._show_index_mgr)
     tool_menu.addAction("🔄 重建索引", main._build_index)
@@ -63,6 +75,11 @@ def build_menubar(main):
 
     help_menu = menubar.addMenu("帮助(&H)")
     help_menu.addAction("⌨️ 快捷键列表", main._show_shortcuts)
+    help_menu.addAction("🌐 网页搜索帮助", main._show_web_search_help)
+    help_menu.addAction("🔢 计算器帮助", main._show_calculator_help)
+    help_menu.addAction("⚡ 快速动作帮助", main._show_quick_actions_help)
+    help_menu.addAction("📄 内容搜索帮助", main._show_content_search_help)
+    help_menu.addAction("🏷 标签搜索帮助", main._show_tag_search_help)
     help_menu.addSeparator()
     help_menu.addAction("ℹ️ 关于", main._show_about)
 
@@ -162,14 +179,39 @@ def build_ui(main):
 
     main.entry_kw = QLineEdit()
     main.entry_kw.setFont(QFont("微软雅黑", 12))
-    main.entry_kw.setPlaceholderText("请输入搜索关键词...")
-    main.entry_kw.returnPressed.connect(main.start_search)
+    # hint: support a quick override to force exact search with leading '!'
+    main.entry_kw.setPlaceholderText(
+        "支持增强语法：dm:7d ext:pdf size:>10mb path:D:\\ ...  （! 前缀强制精确）"
+    )
+    # Do not connect QLineEdit.returnPressed here to avoid duplicate triggers
+    # (we bind a single application-level Return shortcut below).
     row1.addWidget(main.entry_kw, 1)
 
-    main.chk_fuzzy = QCheckBox("模糊")
-    main.chk_fuzzy.setChecked(main.fuzzy_var)
-    main.chk_fuzzy.stateChanged.connect(lambda s: setattr(main, "fuzzy_var", bool(s)))
-    row1.addWidget(main.chk_fuzzy)
+    # 简单搜索模式（Everything 风格）
+    main.chk_simple_mode = QCheckBox("简单模式")
+    try:
+        main.chk_simple_mode.setChecked(main.config_mgr.get_search_simple_mode())
+    except Exception:
+        main.chk_simple_mode.setChecked(True)
+    main.chk_simple_mode.setToolTip("Everything 风格：对文件名和完整路径做子串匹配，简单直观")
+    def _on_simple_mode_changed(state):
+        enabled = bool(state)
+        try:
+            main.config_mgr.set_search_simple_mode(enabled)
+        except Exception:
+            pass
+        # 在简单模式下隐藏自动模式及模糊相关控件，界面更干净
+        try:
+            # only toggle visibility of the auto-mode control; other controls removed
+            if hasattr(main, 'chk_auto_mode'):
+                main.chk_auto_mode.setVisible(not enabled)
+        except Exception:
+            pass
+    main.chk_simple_mode.stateChanged.connect(_on_simple_mode_changed)
+    row1.addWidget(main.chk_simple_mode)
+
+    # 自动/模糊相关控件已移除以保持主界面简洁（simple mode 默认开启）
+    main.chk_simple_mode.stateChanged.connect(_on_simple_mode_changed)
 
     main.chk_regex = QCheckBox("正则")
     main.chk_regex.setChecked(main.regex_var)
@@ -179,11 +221,28 @@ def build_ui(main):
     main.chk_realtime = QCheckBox("实时")
     main.chk_realtime.setChecked(main.force_realtime)
     main.chk_realtime.stateChanged.connect(lambda s: setattr(main, "force_realtime", bool(s)))
+    try:
+        main.chk_realtime.setToolTip("实时扫描（不使用索引）。适合小范围或临时目录，范围大时较慢。")
+    except Exception:
+        pass
     row1.addWidget(main.chk_realtime)
+
+    # 语法帮助按钮（便捷）
+    btn_syntax = QPushButton("❓ 语法")
+    btn_syntax.setFixedWidth(70)
+    try:
+        btn_syntax.clicked.connect(main._show_search_syntax_help)
+    except Exception:
+        pass
+    row1.addWidget(btn_syntax)
 
     main.btn_search = QPushButton("🚀 搜索")
     main.btn_search.setFixedWidth(90)
-    main.btn_search.clicked.connect(main.start_search)
+    # connect to wrapper to avoid duplicate startup and ensure focus behavior
+    try:
+        main.btn_search.clicked.connect(main.start_search_wrapper)
+    except Exception:
+        main.btn_search.clicked.connect(main.start_search)
     row1.addWidget(main.btn_search)
 
     main.btn_refresh = QPushButton("🔄 刷新")
@@ -250,6 +309,8 @@ def build_ui(main):
     body_layout.setSpacing(0)
 
     main.tree = QTreeWidget()
+    # disable built-in Qt sorting to use our custom stable sort on the model list
+    main.tree.setSortingEnabled(False)
     main.tree.setColumnCount(4)
     main.tree.setHeaderLabels(["📄 文件名", "📂 所在目录", "📊 大小/类型", "🕒 修改时间"])
     main.tree.setRootIsDecorated(False)
@@ -258,13 +319,20 @@ def build_ui(main):
     main.tree.itemDoubleClicked.connect(main.on_dblclick)
     main.tree.setContextMenuPolicy(Qt.CustomContextMenu)
     main.tree.customContextMenuRequested.connect(main.show_menu)
+    # 设置文本省略模式：长文本会自动显示省略号
+    main.tree.setTextElideMode(Qt.ElideMiddle)
+    # 设置统一行高，避免文本溢出
+    main.tree.setUniformRowHeights(True)
     main.tree.setStyleSheet(
         """
         QTreeWidget {
             alternate-background-color: #f8f9fa;
             background-color: #ffffff;
         }
-        QTreeWidget::item { padding: 2px; }
+        QTreeWidget::item { 
+            padding: 2px;
+            height: 24px;
+        }
         QTreeWidget::item:selected { background-color: #0078d4; color: white; }
     """
     )
@@ -272,12 +340,22 @@ def build_ui(main):
     header_view = main.tree.header()
     header_view.setSortIndicatorShown(True)
     header_view.setSectionsClickable(True)
+    # Allow users to move/reorder columns by dragging the header
+    try:
+        header_view.setSectionsMovable(True)
+    except Exception:
+        pass
     header_view.sectionResized.connect(main._on_section_resized)
     header_view.setStretchLastSection(False)
-    # Make middle two columns stretch to occupy central space by default
+    # Make column resize modes reasonable:
+    # - filename (0): Interactive (user can resize)
+    # - path (1): Stretch (fills central space)
+    # - size/type (2): Interactive (allow user to resize/move)
+    # - time (3): Interactive (user can resize)
     header_view.setSectionResizeMode(0, QHeaderView.Interactive)
-    header_view.setSectionResizeMode(1, QHeaderView.Stretch)
-    header_view.setSectionResizeMode(2, QHeaderView.Stretch)
+    # Make middle columns interactive so users can resize the divider
+    header_view.setSectionResizeMode(1, QHeaderView.Interactive)
+    header_view.setSectionResizeMode(2, QHeaderView.Interactive)
     header_view.setSectionResizeMode(3, QHeaderView.Interactive)
     header_view.sectionClicked.connect(main.sort_column)
     main._apply_saved_column_widths()
@@ -393,6 +471,48 @@ def bind_shortcuts(main):
     QShortcut(QKeySequence("Ctrl+L"), main, main.open_folder)
     QShortcut(QKeySequence("F5"), main, main.refresh_search)
     QShortcut(QKeySequence("Delete"), main, main.delete_file)
+    # Bind Enter/Return globally to start_search so changing focus (e.g. after
+    # adjusting sensitivity combo) still triggers a search on Enter.
+    try:
+        # bind both Return and Enter to a safe wrapper that checks current focus
+        # If focus is in another input (e.g. mini search's QLineEdit), ignore the global Enter
+        from PySide6.QtWidgets import QApplication, QLineEdit
+
+        def _enter_safe_wrapper():
+            try:
+                fw = QApplication.focusWidget()
+                # If mini search window is open and result list has focus, don't interfere with double Enter logic
+                try:
+                    ms = getattr(main, 'mini_search', None)
+                    if ms and getattr(ms, 'window', None):
+                        if ms.window.isVisible():
+                            if ms.result_listbox.hasFocus():
+                                # Let EnterListWidget handle double Enter for opening
+                                return
+                            if ms.search_entry.hasFocus():
+                                # Trigger mini search directly
+                                ms._on_search()
+                                return
+                except Exception:
+                    pass
+                # If focus is in a QLineEdit but not the main entry, skip global search
+                if isinstance(fw, QLineEdit) and fw is not main.entry_kw:
+                    return
+            except Exception:
+                pass
+            try:
+                main.start_search_wrapper()
+            except Exception:
+                pass
+
+        sc1 = QShortcut(QKeySequence("Return"), main)
+        sc1.setContext(Qt.WidgetWithChildrenShortcut)
+        sc1.activated.connect(_enter_safe_wrapper)
+        sc2 = QShortcut(QKeySequence("Enter"), main)
+        sc2.setContext(Qt.WidgetWithChildrenShortcut)
+        sc2.activated.connect(_enter_safe_wrapper)
+    except Exception:
+        pass
     QShortcut(QKeySequence("Escape"), main, lambda: main.stop_search() if main.is_searching else main.entry_kw.clear())
     try:
         main.entry_kw.installEventFilter(main)

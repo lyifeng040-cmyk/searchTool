@@ -48,6 +48,8 @@ from PySide6.QtWidgets import (
 import html
 import re
 
+from filesearch.core.search_syntax import SearchSyntaxParser
+
 from ..config import ConfigManager
 from ..constants import IS_WINDOWS, SKIP_DIRS_LOWER
 from ..dependencies import HAS_APSW, HAS_SEND2TRASH, HAS_WIN32
@@ -77,6 +79,7 @@ from .hotkey_manager import HotkeyManager
 from .mini_search import MiniSearchWindow
 from .dialogs.cdrive_settings import CDriveSettingsDialog
 from .dialogs.batch_rename import BatchRenameDialog
+from .dialogs.tag_manager_dialog import TagManagerDialog
 # component helpers moved incrementally; keep original methods in this file for now
 
 logger = logging.getLogger(__name__)
@@ -144,13 +147,25 @@ class MainHighlightDelegate(QStyledItemDelegate):
 		if not self._pattern:
 			return f"<div style=\"color:{option.palette.text().color().name()}\">{escaped}</div>"
 		m = self._pattern.search(escaped)
+		# 为高亮选择合适的前景色，选中时使用 highlightedText 并用深色背景以提升对比度
+		is_selected = bool(option.state & QStyle.State_Selected)
+		text_color = (
+			option.palette.highlightedText().color().name()
+			if is_selected
+			else option.palette.text().color().name()
+		)
+		# 更明显的高亮样式：加粗、内边距、圆角和细边框
+		highlight_bg = "#ff6f00" if is_selected else "#ff9800"
+		span_style = (
+			f"background-color:{highlight_bg};color:{text_color};"
+			"font-weight:600;padding:0 4px;border-radius:3px;"
+			"border:1px solid rgba(0,0,0,0.28);"
+		)
 		highlighted = self._pattern.sub(
-			lambda m: f'<span style="background-color:#fff176">{m.group(0)}</span>',
+			lambda m: f'<span style="{span_style}">{m.group(0)}</span>',
 			escaped,
 		)
-		is_selected = bool(option.state & QStyle.State_Selected)
-		color = option.palette.highlightedText().color().name() if is_selected else option.palette.text().color().name()
-		return f'<div style="color:{color};">{highlighted}</div>'
+		return f'<div style="color:{text_color};">{highlighted}</div>'
 
 
 
@@ -198,6 +213,18 @@ class SearchApp(QMainWindow):
 		self.file_watcher = UsnFileWatcher(self.index_mgr, config_mgr=self.config_mgr)
 		self.index_build_stop = False
 		self.file_watcher.files_changed.connect(self._on_files_changed)
+		
+		# 新增功能管理器
+		from filesearch.core.clipboard_history import ClipboardHistory
+		from filesearch.core.quick_actions import ActionManager
+		from filesearch.core.tag_manager import TagManager
+		from filesearch.core.content_search import ContentSearchEngine
+		from filesearch.core.document_search import DocumentSearchEngine
+		self.clipboard_mgr = ClipboardHistory()
+		self.action_mgr = ActionManager()
+		self.tag_mgr = TagManager()
+		self.content_search = ContentSearchEngine()
+		self.doc_search = DocumentSearchEngine()
 
 		# 状态定时器
 		self.status_timer = QTimer(self)
@@ -222,6 +249,18 @@ class SearchApp(QMainWindow):
 		build_ui(self)
 		bind_shortcuts(self)
 
+		# 确保启动后窗口激活并聚焦搜索框
+		QTimer.singleShot(0, self._ensure_initial_focus)
+
+		# 即时搜索定时器（去抖动）
+		self._search_timer = None
+		self._last_search_text = ""
+		# 连接搜索框 textChanged 信号实现即时搜索
+		try:
+			self.entry_kw.textChanged.connect(self._on_text_changed)
+		except Exception:
+			pass
+
 		# 初始化托盘和热键
 		self._init_tray_and_hotkey()
 		self._did_initial_resize = False
@@ -230,6 +269,28 @@ class SearchApp(QMainWindow):
 		# 启动时加载 DIR_CACHE，加快监控
 		QTimer.singleShot(100, self._load_dir_cache_all)
 		QTimer.singleShot(500, self._check_index)
+		
+		# 首次显示标记
+		self._first_show = True
+
+	# ==================== 窗口事件 ====================
+	def showEvent(self, event):
+		"""窗口显示事件 - 首次打开自动聚焦搜索框"""
+		super().showEvent(event)
+		if self._first_show:
+			self._first_show = False
+			# 进一步延迟聚焦，避免其他控件抢焦点
+			QTimer.singleShot(150, self._ensure_initial_focus)
+			QTimer.singleShot(300, self._ensure_initial_focus)
+
+	def _ensure_initial_focus(self):
+		try:
+			self.activateWindow()
+			if hasattr(self, 'entry_kw') and self.entry_kw is not None:
+				self.entry_kw.setFocus()
+				self.entry_kw.selectAll()
+		except Exception:
+			pass
 
 	# ==================== 构建/状态 ====================
 	def on_build_progress(self, count, message):
@@ -241,6 +302,28 @@ class SearchApp(QMainWindow):
 		self._check_index()
 		self.status_path.setText("")
 		self.status.setText(f"✅ 索引完成 ({self.index_mgr.file_count:,})")
+		
+		# 同步初始化所有盘的 Rust 搜索索引
+		from ..core.rust_search import get_rust_search_engine
+		rust_engine = get_rust_search_engine()
+		if rust_engine:
+			drives = []
+			for c in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+				if os.path.exists(f"{c}:\\"):
+					drives.append(c)
+			
+			if drives:
+				logger.info(f"📊 开始初始化 Rust 搜索索引: {', '.join([f'{d}:' for d in drives])}")
+				for drive in drives:
+					try:
+						# 先尝试加载，加载失败才初始化
+						if not rust_engine.load_index(drive):
+							logger.info(f"🔄 {drive}: 盘首次初始化...")
+							rust_engine.init_index(drive)
+					except Exception as e:
+						logger.error(f"❌ {drive}: 初始化失败: {e}")
+				logger.info("✅ Rust 搜索索引初始化完成")
+		
 		self.file_watcher.stop()
 		self.file_watcher.start(self._get_drives())
 		logger.info("👁️ 文件监控已启动")
@@ -299,12 +382,97 @@ class SearchApp(QMainWindow):
 	# — UI is now fully constructed by `ui_builder`.
 
 	def eventFilter(self, obj, event):
-		if obj == self.entry_kw and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Down:
-			if self.tree.topLevelItemCount() > 0:
-				item = self.tree.topLevelItem(0)
-				self.tree.setCurrentItem(item)
-				self.tree.setFocus()
-			return True
+		"""统一事件过滤器：处理搜索框下键和树控件快捷键"""
+		if event.type() == QEvent.KeyPress:
+			key = event.key()
+			modifiers = event.modifiers()
+
+			# 搜索框按下向下键，聚焦到结果树
+			if obj == getattr(self, 'entry_kw', None) and key == Qt.Key_Down:
+				if getattr(self, 'tree', None) and self.tree.topLevelItemCount() > 0:
+					item = self.tree.topLevelItem(0)
+					self.tree.setCurrentItem(item)
+					self.tree.setFocus()
+				return True
+
+			# 检测哪个树控件有焦点
+			focused_tree = None
+			if getattr(self, 'tree', None) and self.tree.hasFocus():
+				focused_tree = self.tree
+
+			if focused_tree:
+				item = focused_tree.currentItem()
+				if not item:
+					return super().eventFilter(obj, event)
+
+				try:
+					fp = item.text(2)  # 完整路径在第3列
+					is_dir = os.path.isdir(fp)
+				except Exception:
+					return super().eventFilter(obj, event)
+
+				# Ctrl+C: 复制文件路径
+				if key == Qt.Key_C and modifiers & Qt.ControlModifier:
+					QApplication.clipboard().setText(fp)
+					self.status.setText("✅ 路径已复制")
+					return True
+
+				# Ctrl+E: 在资源管理器中定位
+				if key == Qt.Key_E and modifiers & Qt.ControlModifier:
+					try:
+						subprocess.Popen(f'explorer /select,"{fp}"')
+					except Exception as e:
+						logger.error(f"定位失败: {e}")
+					return True
+
+				# Ctrl+T: 在终端打开
+				if key == Qt.Key_T and modifiers & Qt.ControlModifier:
+					try:
+						if is_dir:
+							subprocess.Popen(f'powershell -NoExit -Command "Set-Location \\"{fp}\\""')
+						else:
+							parent_dir = os.path.dirname(fp)
+							subprocess.Popen(f'powershell -NoExit -Command "Set-Location \\"{parent_dir}\\""')
+					except Exception as e:
+						logger.error(f"终端打开失败: {e}")
+					return True
+
+				# Delete: 删除文件或目录
+				if key == Qt.Key_Delete:
+					if QMessageBox.question(self, "确认删除", f"删除: {item.text(0)}?") == QMessageBox.Yes:
+						try:
+							if HAS_SEND2TRASH and HAS_WIN32:
+								import send2trash
+								send2trash.send2trash(fp)
+							else:
+								if is_dir:
+									shutil.rmtree(fp)
+								else:
+									os.remove(fp)
+							focused_tree.takeTopLevelItem(focused_tree.indexOfTopLevelItem(item))
+							self.status.setText(f"✅ 已删除: {item.text(0)}")
+						except Exception as e:
+							QMessageBox.warning(self, "删除失败", f"无法删除: {e}")
+					return True
+
+				# Ctrl+1-9: 快速选择
+				if Qt.Key_1 <= key <= Qt.Key_9 and modifiers & Qt.ControlModifier:
+					num = key - Qt.Key_0
+					if 0 < num <= focused_tree.topLevelItemCount():
+						focused_tree.setCurrentItem(focused_tree.topLevelItem(num - 1))
+					return True
+
+				# Enter: 打开文件或目录
+				if key in (Qt.Key_Return, Qt.Key_Enter):
+					try:
+						if is_dir:
+							subprocess.Popen(f'explorer "{fp}"')
+						else:
+							os.startfile(fp)
+					except Exception as e:
+						logger.error(f"打开失败: {e}")
+					return True
+
 		return super().eventFilter(obj, event)
 
 	# ==================== 索引状态 ====================
@@ -1072,16 +1240,184 @@ class SearchApp(QMainWindow):
 			self._did_initial_resize = True
 
 	# ==================== 搜索 ====================
-	def start_search(self):
+	def _on_text_changed(self, text):
+		"""即时搜索：输入变化时使用去抖动定时器触发搜索"""
+		if self._search_timer is not None:
+			self._search_timer.stop()
+			self._search_timer.deleteLater()
+			self._search_timer = None
+
+		text = text.strip()
+		if not text:
+			return
+
+		# 去抖动：100ms 后触发搜索
+		if text != self._last_search_text:
+			self._search_timer = QTimer()
+			self._search_timer.setSingleShot(True)
+			self._search_timer.timeout.connect(lambda: self._trigger_instant_search(text))
+			self._search_timer.start(100)
+
+	def _trigger_instant_search(self, text):
+		"""真正触发即时搜索"""
+		# 若正在搜索，优先取消当前任务以避免旧查询占用资源
+		if self.is_searching:
+			try:
+				self.stop_search()
+			except Exception:
+				pass
+
+		# 对不完整的增强语法做延迟：例如 dm: 尚未输入完整的值/单位时不触发重负载搜索
+		try:
+			from filesearch.core.search_syntax import SearchSyntaxParser
+			parser = SearchSyntaxParser()
+			clean_kw, filters = parser.parse(text)
+			# 当用户输入的是增强语法但尚未形成有效过滤（例如正在输入 dm:7d 过程中的 dm: 或 dm:7）时，跳过即时搜索
+			if text.strip().lower().startswith('dm:') and not filters.get('date_after'):
+				return
+		except Exception:
+			# 解析失败则继续正常流程，以免阻塞
+			pass
+
+		self._last_search_text = text
+		self.start_search(silent=True)
+
+	def start_search_wrapper(self):
+		"""Enter 键触发搜索的包装方法（检查是否有焦点在树上）"""
+		# 如果焦点在结果树上，Enter 用于打开文件，不触发搜索
+		if getattr(self, 'tree', None) and self.tree.hasFocus():
+			return
+		self.start_search()
+
+	def start_search(self, silent=False):
 		if self.is_searching:
 			return
 		kw = self.entry_kw.text().strip()
 		if not kw:
-			QMessageBox.warning(self, "提示", "请输入关键词")
+			if not silent:
+				QMessageBox.warning(self, "提示", "请输入关键词")
 			return
+		
+		# 检测书签搜索 (bm: 前缀)
+		if kw.lower().startswith('bm:'):
+			keyword = kw[3:].strip()
+			self._show_bookmark_search(keyword)
+			return
+		
+		# 检测进程搜索 (ps: 或 process: 前缀)
+		if kw.lower().startswith('ps:') or kw.lower().startswith('process:'):
+			keyword = kw.split(':', 1)[1].strip()
+			self._show_process_manager(keyword)
+			return
+		
+		# 检测最近文件 (recent: 前缀)
+		if kw.lower().startswith('recent:'):
+			keyword = kw[7:].strip()
+			self._show_recent_files(keyword)
+			return
+		
+		# 检测浏览器历史 (history: 前缀)
+		if kw.lower().startswith('history:'):
+			keyword = kw[8:].strip()
+			self._show_browser_history(keyword)
+			return
+		
+		# 检测系统快捷方式 (sys: 或 control: 前缀)
+		if kw.lower().startswith('sys:') or kw.lower().startswith('control:'):
+			keyword = kw.split(':', 1)[1].strip()
+			self._show_system_shortcuts(keyword)
+			return
+		
+		# 检测内容搜索 (content: 前缀)
+		if kw.lower().startswith('content:'):
+			pattern = kw[8:].strip()
+			self._show_content_search(pattern)
+			return
+		
+		# 检测文档搜索 (doc: 前缀)
+		if kw.lower().startswith('doc:'):
+			pattern = kw[4:].strip()
+			self._show_document_search(pattern)
+			return
+		
+		# 检测标签搜索 (tag: 前缀)
+		if kw.lower().startswith('tag:'):
+			tags = kw[4:].strip()
+			self._show_tag_search(tags)
+			return
+		
+		# 检测颜色工具
+		from filesearch.core.color_unit_tools import ColorTool
+		if ColorTool.is_color(kw):
+			color_info = ColorTool.parse_color(kw)
+			if color_info:
+				self._show_color_info(color_info)
+				return
+		
+		# 检测单位转换
+		from filesearch.core.color_unit_tools import UnitConverter
+		if UnitConverter.is_conversion(kw):
+			success, result = UnitConverter.convert(kw)
+			if success:
+				self.status.setText(f"🔧 转换结果: {result}")
+				clipboard = QApplication.clipboard()
+				clipboard.setText(result)
+				QMessageBox.information(self, "单位转换", f"{result}\n\n结果已复制到剪贴板")
+				return
+		
+		# 检测网页搜索
+		from filesearch.core.web_search import WebSearchEngine
+		engine_key, web_query = WebSearchEngine.parse_query(kw)
+		if engine_key and web_query:
+			engine_info = WebSearchEngine.get_engine_info(engine_key)
+			success = WebSearchEngine.search(engine_key, web_query)
+			if success:
+				self.status.setText(f"🌐 已在 {engine_info['name']} 中搜索: {web_query}")
+				return
+			else:
+				self.status.setText(f"❌ 无法打开 {engine_info['name']}")
+				return
+		
+		# 检测计算器
+		from filesearch.core.calculator import Calculator
+		if Calculator.is_expression(kw):
+			success, result = Calculator.calculate(kw)
+			if success:
+				# 显示计算结果
+				self.status.setText(f"🔢 计算结果: {kw} = {result}")
+				# 复制结果到剪贴板
+				clipboard = QApplication.clipboard()
+				clipboard.setText(str(result))
+				QMessageBox.information(self, "计算结果", 
+					f"{kw}\n\n= {result}\n\n结果已复制到剪贴板")
+				return
+			else:
+				# 计算失败，继续文件搜索
+				pass
+		
+		# 检测快速动作
+		action_keywords = ["compress", "zip", "压缩", "vscode", "code", "git", "email", "邮件", "copyto", "复制到桌面"]
+		kw_lower = kw.lower()
+		for action_kw in action_keywords:
+			if action_kw in kw_lower:
+				# 获取选中的文件
+				selected_items = self._get_selected_items()
+				if selected_items:
+					filepaths = [item["fullpath"] for item in selected_items]
+					success, message = self.action_mgr.execute_action(action_kw, filepaths)
+					if success:
+						self.status.setText(f"✅ {message}")
+					else:
+						self.status.setText(f"❌ {message}")
+					return
 
+		# 解析搜索语法
+		syntax_parser = SearchSyntaxParser()
+		clean_kw, syntax_filters = syntax_parser.parse(kw)
+		
+		# 保存原始关键词和过滤器
 		self.config_mgr.add_history(kw)
-		self.last_search_params = {"kw": kw}
+		self.last_search_params = {"kw": kw, "clean_kw": clean_kw, "syntax_filters": syntax_filters}
 		self.last_search_scope = self.combo_scope.currentText()
 
 		self.tree.clear()
@@ -1092,7 +1428,28 @@ class SearchApp(QMainWindow):
 		self.ext_var.setCurrentText("全部")
 		self.size_var.setCurrentText("不限")
 		self.date_var.setCurrentText("不限")
-		self.lbl_filter.setText("")
+		
+		# 显示语法过滤器提示
+		filter_hints = []
+		if syntax_filters.get("extensions"):
+			filter_hints.append(f"扩展名: {', '.join(syntax_filters['extensions'])}")
+		if syntax_filters.get("size_min") or syntax_filters.get("size_max"):
+			size_hint = "大小: "
+			if syntax_filters.get("size_min"):
+				size_hint += f">={self._format_size(syntax_filters['size_min'])} "
+			if syntax_filters.get("size_max"):
+				size_hint += f"<={self._format_size(syntax_filters['size_max'])}"
+			filter_hints.append(size_hint)
+		if syntax_filters.get("date_start") or syntax_filters.get("date_end"):
+			filter_hints.append("日期: 已设置")
+		if syntax_filters.get("path_include"):
+			filter_hints.append(f"路径包含: {', '.join(syntax_filters['path_include'])}")
+		if syntax_filters.get("name_pattern"):
+			filter_hints.append(f"名称: {syntax_filters['name_pattern']}")
+		if syntax_filters.get("dir_name"):
+			filter_hints.append(f"目录名: {syntax_filters['dir_name']}")
+		
+		self.lbl_filter.setText(" | ".join(filter_hints) if filter_hints else "")
 
 		with self.results_lock:
 			self.all_results.clear()
@@ -1102,7 +1459,7 @@ class SearchApp(QMainWindow):
 		# 通知高亮 delegate 当前关键词
 		try:
 			if getattr(self, "_main_highlight_delegate", None):
-				keywords = kw.lower().split()
+				keywords = clean_kw.lower().split() if clean_kw else kw.lower().split()
 				self._main_highlight_delegate.set_keywords(keywords)
 		except Exception:
 			pass
@@ -1117,8 +1474,10 @@ class SearchApp(QMainWindow):
 		self.status.setText("🔍 搜索中...")
 
 		scope_targets = self._get_search_scope_targets()
-		self.status.setText("⚡ 索引搜索..." if not self.force_realtime else "🔍 实时扫描...")
-		self.worker, is_realtime = create_worker(self.index_mgr, kw, scope_targets, self.regex_var, self.fuzzy_var, self.force_realtime)
+		self.status.setText("⚡ Rust 索引搜索..." if not self.force_realtime else "🔍 实时扫描...")
+		# 使用清理后的关键词进行搜索
+		search_kw = clean_kw if clean_kw else kw
+		self.worker, is_realtime = create_worker(self.index_mgr, search_kw, scope_targets, self.regex_var, self.force_realtime)
 		if is_realtime:
 			try:
 				self.worker.progress.connect(self.on_rt_progress)
@@ -1129,6 +1488,17 @@ class SearchApp(QMainWindow):
 		self.worker.finished.connect(self.on_search_finished)
 		self.worker.error.connect(self.on_search_error)
 		self.worker.start()
+	
+	def _format_size(self, size_bytes):
+		"""格式化字节大小为人类可读格式"""
+		if size_bytes < 1024:
+			return f"{size_bytes}B"
+		elif size_bytes < 1024 * 1024:
+			return f"{size_bytes / 1024:.1f}KB"
+		elif size_bytes < 1024 * 1024 * 1024:
+			return f"{size_bytes / (1024 * 1024):.1f}MB"
+		else:
+			return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
 
 	def refresh_search(self):
 		if self.last_search_params and not self.is_searching:
@@ -1164,6 +1534,15 @@ class SearchApp(QMainWindow):
 		self.progress.setVisible(False)
 
 	def on_batch_ready(self, batch):
+		# 应用语法过滤器
+		syntax_filters = self.last_search_params.get("syntax_filters", {})
+		if syntax_filters:
+			syntax_parser = SearchSyntaxParser()
+			# 设置过滤器
+			syntax_parser.filters = syntax_filters
+			# 应用过滤
+			batch = syntax_parser.apply_filters(batch)
+		
 		with self.results_lock:
 			for item_data in batch:
 				fp = item_data["fullpath"]
@@ -1238,8 +1617,20 @@ class SearchApp(QMainWindow):
 		ctx_menu.addAction("📄 复制文件", self.copy_file)
 		ctx_menu.addAction("📝 复制路径", self.copy_path)
 		ctx_menu.addSeparator()
+		ctx_menu.addAction("🔐 计算 Hash", self._show_file_hash_from_menu)
+		ctx_menu.addSeparator()
 		ctx_menu.addAction("🗑️ 删除", self.delete_file)
 		ctx_menu.exec_(self.tree.viewport().mapToGlobal(pos))
+	
+	def _show_file_hash_from_menu(self):
+		"""从右键菜单显示文件 Hash 计算对话框"""
+		items = self._get_selected_items()
+		if items:
+			filepaths = [item["fullpath"] for item in items if item.get("type_code") == 1]
+			if filepaths:
+				self._show_file_hash_calculator(filepaths)
+			else:
+				QMessageBox.warning(self, "提示", "请选择文件（不支持文件夹）")
 
 	def _get_sel(self):
 		sel = self.tree.currentItem()
@@ -1368,7 +1759,16 @@ class SearchApp(QMainWindow):
 		if not item:
 			return
 
+		fullpath = item.get("fullpath", "")
 		ext = os.path.splitext(item.get("filename", ""))[1].lower()
+		
+		# 图片文件预览
+		image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".ico", ".webp", ".tiff", ".svg"}
+		if ext in image_exts:
+			self._show_image_preview(fullpath)
+			return
+		
+		# 文本文件预览
 		text_exts = {
 			".txt",
 			".log",
@@ -1390,26 +1790,35 @@ class SearchApp(QMainWindow):
 		}
 
 		if ext in text_exts:
-			self._preview_text(item["fullpath"])
+			self._preview_text(fullpath)
 		elif item.get("type_code") == 0:
 			try:
-				subprocess.Popen(f'explorer "{item["fullpath"]}"')
+				subprocess.Popen(f'explorer "{fullpath}"')
 			except Exception as e:  # noqa: BLE001
 				QMessageBox.warning(self, "错误", f"无法打开文件夹: {e}")
 		else:
 			try:
-				os.startfile(item["fullpath"])
+				os.startfile(fullpath)
 			except Exception as e:  # noqa: BLE001
 				QMessageBox.warning(self, "错误", f"无法打开文件: {e}")
 
 	def _preview_text(self, path):
 		dlg = QDialog(self)
 		dlg.setWindowTitle(f"预览: {os.path.basename(path)}")
-		dlg.resize(800, 600)
+		dlg.resize(900, 650)
 		dlg.setModal(True)
 
 		layout = QVBoxLayout(dlg)
 		layout.setContentsMargins(5, 5, 5, 5)
+		
+		# 添加搜索栏
+		search_layout = QHBoxLayout()
+		search_label = QLabel("搜索:")
+		search_input = QLineEdit()
+		search_input.setPlaceholderText("输入关键词高亮显示...")
+		search_layout.addWidget(search_label)
+		search_layout.addWidget(search_input)
+		layout.addLayout(search_layout)
 
 		text = QTextEdit()
 		text.setFont(QFont("Consolas", 10))
@@ -1418,10 +1827,60 @@ class SearchApp(QMainWindow):
 
 		try:
 			with open(path, "r", encoding="utf-8", errors="ignore") as f:
-				content = f.read(200000)
-			if len(content) >= 200000:
-				content += "\n\n... [文件过大，仅显示前200KB] ..."
-			text.setPlainText(content)
+				lines = f.readlines()
+			
+			# 限制显示行数
+			max_lines = 5000
+			if len(lines) > max_lines:
+				lines = lines[:max_lines]
+				truncated = True
+			else:
+				truncated = False
+			
+			# 添加行号
+			content_with_line_numbers = ""
+			for i, line in enumerate(lines, 1):
+				content_with_line_numbers += f"{i:5d} | {line}"
+			
+			if truncated:
+				content_with_line_numbers += f"\n\n... [文件过大，仅显示前{max_lines}行] ..."
+			
+			text.setPlainText(content_with_line_numbers)
+			
+			# 搜索高亮功能
+			def highlight_search(keyword):
+				if not keyword:
+					# 清除高亮
+					text.setPlainText(content_with_line_numbers)
+					return
+				
+				# 使用 HTML 高亮关键词
+				import html as html_module
+				highlighted = content_with_line_numbers
+				keyword_escaped = html_module.escape(keyword)
+				
+				# 简单的关键词高亮（不区分大小写）
+				import re
+				pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+				highlighted = pattern.sub(
+					lambda m: f'<span style="background-color: yellow; color: black;">{html_module.escape(m.group())}</span>',
+					html_module.escape(highlighted)
+				)
+				highlighted = highlighted.replace('\n', '<br>')
+				highlighted = highlighted.replace(' ', '&nbsp;')
+				
+				text.setHtml(f'<pre style="font-family: Consolas; font-size: 10pt;">{highlighted}</pre>')
+			
+			search_input.textChanged.connect(highlight_search)
+			
+			# 如果有当前搜索关键词，自动高亮
+			try:
+				current_kw = self.entry_kw.text().strip()
+				if current_kw and len(current_kw) >= 2:
+					search_input.setText(current_kw)
+			except Exception:
+				pass
+				
 		except Exception as e:  # noqa: BLE001
 			text.setPlainText(f"无法读取文件: {e}")
 
@@ -1737,11 +2196,23 @@ class SearchApp(QMainWindow):
 			self,
 			"关于",
 			"🚀 极速文件搜索 V42 增强版\n\n"
-			"功能特性:\n"
+			"核心功能:\n"
 			"• MFT极速索引\n"
 			"• FTS5全文搜索\n"
+			"• 高级搜索语法 (ext:、size:、dm:、path:)\n"
+			"• 重复文件查找\n"
+			"• 文件 Hash 计算 (MD5/SHA256)\n"
+			"• 图片预览 (支持缩放)\n"
 			"• 模糊/正则搜索\n"
 			"• 实时文件监控\n"
+			"• 保存搜索条件\n\n"
+			"新增超能力:\n"
+			"• 🌐 网页搜索 (g:, bd:, gh:, yt: 等)\n"
+			"• 🔢 智能计算器 (数学表达式)\n"
+			"• ⚡ 快速动作 (compress, vscode, git 等)\n"
+			"• 📋 剪贴板历史\n"
+			"• 📝 文本预览增强 (行号+高亮)\n\n"
+			"其他特性:\n"
 			"• 收藏夹管理\n"
 			"• 多主题支持\n"
 			"• 全局热键呼出\n"
@@ -1749,6 +2220,753 @@ class SearchApp(QMainWindow):
 			"• C盘目录自定义\n\n"
 			"© 2024",
 		)
+
+	# ==================== 新增高级功能 ====================
+	def _show_search_syntax_help(self):
+		"""显示搜索语法帮助"""
+		try:
+			from .dialogs.search_syntax_help import SearchSyntaxHelpDialog
+			dlg = SearchSyntaxHelpDialog(self)
+			dlg.exec()
+		except Exception as e:
+			logger.error(f"显示搜索语法帮助失败: {e}")
+			QMessageBox.warning(self, "错误", f"无法显示搜索语法帮助: {e}")
+
+	def _show_duplicate_finder(self):
+		"""显示重复文件查找对话框"""
+		try:
+			from .dialogs.duplicate_finder import DuplicateFinderDialog
+			default_path = self.combo_scope.currentText()
+			if "所有磁盘" in default_path:
+				default_path = ""
+			dlg = DuplicateFinderDialog(self, default_path)
+			dlg.exec()
+		except Exception as e:
+			logger.error(f"显示重复文件查找失败: {e}")
+			QMessageBox.warning(self, "错误", f"无法打开重复文件查找: {e}")
+
+	def _show_file_hash_calculator(self, filepaths=None):
+		"""显示文件 Hash 计算对话框"""
+		try:
+			from .dialogs.file_hash_dialog import FileHashDialog
+			# 使用传入的文件列表或获取选中的文件
+			selected_files = filepaths if filepaths else []
+			
+			if not selected_files:
+				for item in self.tree.selectedItems():
+					try:
+						idx = self.tree.indexOfTopLevelItem(item)
+						if 0 <= idx < len(self.filtered_results):
+							data = self.filtered_results[idx]
+							fullpath = data.get("fullpath", "")
+							if fullpath and os.path.isfile(fullpath):
+								selected_files.append(fullpath)
+					except Exception:
+						continue
+			
+			if not selected_files:
+				QMessageBox.information(self, "提示", "请先选择要计算 Hash 的文件")
+				return
+			
+			dlg = FileHashDialog(self, selected_files)
+			dlg.exec()
+		except Exception as e:
+			logger.error(f"显示文件 Hash 计算失败: {e}")
+			QMessageBox.warning(self, "错误", f"无法打开 Hash 计算: {e}")
+
+	def _show_saved_searches(self):
+		"""显示保存的搜索对话框"""
+		try:
+			from .dialogs.saved_search import SavedSearchDialog
+			dlg = SavedSearchDialog(self, self.config_mgr)
+			dlg.exec()
+		except Exception as e:
+			logger.error(f"显示保存的搜索失败: {e}")
+			QMessageBox.warning(self, "错误", f"无法打开保存的搜索: {e}")
+
+	def _show_image_preview(self, filepath):
+		"""显示图片预览"""
+		try:
+			from .dialogs.image_preview import ImagePreviewDialog
+			dlg = ImagePreviewDialog(self, filepath)
+			dlg.exec()
+		except Exception as e:
+			logger.error(f"显示图片预览失败: {e}")
+			QMessageBox.warning(self, "错误", f"无法预览图片: {e}")
+	
+	def _show_clipboard_history(self):
+		"""显示剪贴板历史"""
+		try:
+			from .dialogs.clipboard_history_dialog import ClipboardHistoryDialog
+			dlg = ClipboardHistoryDialog(self, self.clipboard_mgr)
+			dlg.exec()
+		except Exception as e:
+			logger.error(f"显示剪贴板历史失败: {e}")
+			QMessageBox.warning(self, "错误", f"无法打开剪贴板历史: {e}")
+	
+	def _show_web_search_help(self):
+		"""显示网页搜索帮助"""
+		from filesearch.core.web_search import WebSearchEngine
+		help_text = WebSearchEngine.get_help_text()
+		QMessageBox.information(self, "🌐 网页搜索帮助", help_text)
+	
+	def _show_calculator_help(self):
+		"""显示计算器帮助"""
+		from filesearch.core.calculator import Calculator
+		help_text = Calculator.get_help_text()
+		QMessageBox.information(self, "🔢 计算器帮助", help_text)
+	
+	def _show_quick_actions_help(self):
+		"""显示快速动作帮助"""
+		help_text = self.action_mgr.get_help_text()
+		QMessageBox.information(self, "⚡ 快速动作帮助", help_text)
+	
+	def _show_content_search_help(self):
+		"""显示内容搜索帮助"""
+		help_text = """
+📄 内容搜索 - 搜索文件内容
+
+使用方法:
+  content:关键词    - 搜索文本文件内容
+  
+示例:
+  content:TODO      - 搜索包含 TODO 的文件
+  content:import    - 搜索包含 import 的代码文件
+  content:bug       - 搜索包含 bug 的日志文件
+
+支持的文件类型:
+  • 文本文件: .txt, .log, .md
+  • 代码文件: .py, .js, .java, .c, .cpp, .html, .css
+  • 配置文件: .json, .yaml, .xml, .ini, .cfg
+  • 其他: 所有纯文本文件
+
+高级搜索:
+  • 使用 doc: 前缀搜索 Office 文档 (需要安装依赖)
+  • 支持正则表达式 (在搜索框中输入)
+  • 显示匹配行的上下文
+
+注意:
+  • 默认搜索当前选择的范围
+  • 文件大小限制: 10MB
+  • 自动检测文件编码
+		"""
+		QMessageBox.information(self, "📄 内容搜索帮助", help_text.strip())
+	
+	def _show_tag_search_help(self):
+		"""显示标签搜索帮助"""
+		help_text = """
+🏷 标签管理 - 给文件打标签，快速分类
+
+使用方法:
+  tag:标签名        - 搜索具有该标签的文件
+  tag:tag1,tag2     - 搜索具有任一标签的文件
+  Ctrl+T            - 打开标签管理器
+
+标签管理器功能:
+  • 📊 标签云 - 查看所有标签和使用频率
+  • 📄 文件标签 - 给选中文件添加/删除标签
+  • 🔍 标签搜索 - 按标签搜索文件
+
+标签操作:
+  • 添加标签: 选中文件 → Ctrl+T → 输入标签名
+  • 删除标签: 标签管理器 → 选择标签 → 删除
+  • 重命名标签: 标签管理器 → 重命名
+  • 设置颜色: 标签管理器 → 设置颜色
+
+示例:
+  tag:工作          - 查找工作相关文件
+  tag:重要,紧急     - 查找重要或紧急的文件
+  
+提示:
+  • 标签数据保存在: ~/.filesearch_tags.json
+  • 支持标签云可视化
+  • 可以给同一文件添加多个标签
+		"""
+		QMessageBox.information(self, "🏷 标签搜索帮助", help_text.strip())
+	
+	def _show_bookmark_search(self, keyword=""):
+		"""显示书签搜索"""
+		from filesearch.core.bookmark_manager import BookmarkManager
+		import webbrowser
+		
+		bookmarks = BookmarkManager.search_bookmarks(keyword)
+		
+		if not bookmarks:
+			QMessageBox.information(self, "书签搜索", "未找到书签")
+			return
+		
+		# 创建简单对话框显示书签
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"📚 书签搜索: {keyword or '全部'}")
+		dlg.resize(800, 500)
+		
+		layout = QVBoxLayout(dlg)
+		
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem
+		list_widget = QListWidget()
+		
+		for bm in bookmarks[:100]:  # 限制显示100个
+			item_text = f"[{bm['browser']}] {bm['title']}\n{bm['url']}"
+			item = QListWidgetItem(item_text)
+			item.setData(Qt.UserRole, bm['url'])
+			list_widget.addItem(item)
+		
+		def open_bookmark(item):
+			url = item.data(Qt.UserRole)
+			webbrowser.open(url)
+			dlg.close()
+		
+		list_widget.itemDoubleClicked.connect(open_bookmark)
+		layout.addWidget(list_widget)
+		
+		btn_layout = QHBoxLayout()
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addStretch()
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_process_manager(self, keyword=""):
+		"""显示进程管理器"""
+		from filesearch.core.process_manager import ProcessManager
+		
+		processes = ProcessManager.search_processes(keyword)
+		
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"🔄 进程管理器: {keyword or '全部'}")
+		dlg.resize(900, 600)
+		
+		layout = QVBoxLayout(dlg)
+		
+		from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+		tree = QTreeWidget()
+		tree.setHeaderLabels(["PID", "进程名", "CPU %", "内存 (MB)"])
+		tree.setColumnWidth(0, 80)
+		tree.setColumnWidth(1, 300)
+		tree.setColumnWidth(2, 100)
+		
+		for proc in sorted(processes, key=lambda x: x['memory_mb'], reverse=True)[:200]:
+			item = QTreeWidgetItem([
+				str(proc['pid']),
+				proc['name'],
+				f"{proc['cpu_percent']:.1f}",
+				f"{proc['memory_mb']:.1f}"
+			])
+			item.setData(0, Qt.UserRole, proc['pid'])
+			tree.addItem(item)
+		
+		layout.addWidget(tree)
+		
+		btn_layout = QHBoxLayout()
+		btn_kill = QPushButton("🗑️ 结束进程")
+		
+		def kill_selected():
+			current = tree.currentItem()
+			if current:
+				pid = current.data(0, Qt.UserRole)
+				reply = QMessageBox.question(dlg, "确认", f"确定要结束进程 {pid} 吗？")
+				if reply == QMessageBox.Yes:
+					success, msg = ProcessManager.kill_process(pid)
+					if success:
+						QMessageBox.information(dlg, "成功", msg)
+						tree.takeTopLevelItem(tree.indexOfTopLevelItem(current))
+					else:
+						QMessageBox.warning(dlg, "失败", msg)
+		
+		btn_kill.clicked.connect(kill_selected)
+		btn_layout.addWidget(btn_kill)
+		btn_layout.addStretch()
+		
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_recent_files(self, keyword=""):
+		"""显示最近文件"""
+		from filesearch.core.recent_files import RecentFilesManager
+		
+		files = RecentFilesManager.search_recent_files(keyword)
+		
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"📝 最近文件: {keyword or '全部'}")
+		dlg.resize(800, 500)
+		
+		layout = QVBoxLayout(dlg)
+		
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem
+		import datetime
+		
+		list_widget = QListWidget()
+		
+		for file_info in files:
+			dt = datetime.datetime.fromtimestamp(file_info['access_time'])
+			time_str = dt.strftime("%Y-%m-%d %H:%M")
+			item_text = f"[{time_str}] {file_info['name']}\n{file_info['path']}"
+			item = QListWidgetItem(item_text)
+			item.setData(Qt.UserRole, file_info['path'])
+			list_widget.addItem(item)
+		
+		def open_file(item):
+			path = item.data(Qt.UserRole)
+			try:
+				os.startfile(path)
+			except Exception as e:
+				QMessageBox.warning(dlg, "错误", f"无法打开文件: {e}")
+		
+		list_widget.itemDoubleClicked.connect(open_file)
+		layout.addWidget(list_widget)
+		
+		btn_layout = QHBoxLayout()
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addStretch()
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_browser_history(self, keyword=""):
+		"""显示浏览器历史"""
+		from filesearch.core.browser_history import BrowserHistoryManager
+		import webbrowser
+		
+		history = BrowserHistoryManager.search_history(keyword, limit=200)
+		
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"🌐 浏览器历史: {keyword or '全部'}")
+		dlg.resize(900, 600)
+		
+		layout = QVBoxLayout(dlg)
+		
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem
+		import datetime
+		
+		list_widget = QListWidget()
+		
+		for item_data in history:
+			dt = datetime.datetime.fromtimestamp(item_data['timestamp'])
+			time_str = dt.strftime("%Y-%m-%d %H:%M")
+			item_text = f"[{item_data['browser']}] [{time_str}] {item_data['title']}\n{item_data['url']}"
+			item = QListWidgetItem(item_text)
+			item.setData(Qt.UserRole, item_data['url'])
+			list_widget.addItem(item)
+		
+		def open_url(item):
+			url = item.data(Qt.UserRole)
+			webbrowser.open(url)
+		
+		list_widget.itemDoubleClicked.connect(open_url)
+		layout.addWidget(list_widget)
+		
+		btn_layout = QHBoxLayout()
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addStretch()
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_system_shortcuts(self, keyword=""):
+		"""显示系统快捷方式"""
+		from filesearch.core.windows_shortcuts import WindowsShortcuts
+		
+		shortcuts = WindowsShortcuts.search_shortcuts(keyword) if keyword else WindowsShortcuts.get_all_shortcuts()
+		
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"⚙️ 系统快捷方式: {keyword or '全部'}")
+		dlg.resize(700, 500)
+		
+		layout = QVBoxLayout(dlg)
+		
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem
+		
+		list_widget = QListWidget()
+		
+		for shortcut in shortcuts:
+			item_text = f"{shortcut['icon']} {shortcut['name']} ({shortcut['key']})"
+			item = QListWidgetItem(item_text)
+			item.setData(Qt.UserRole, shortcut['key'])
+			list_widget.addItem(item)
+		
+		def open_shortcut(item):
+			key = item.data(Qt.UserRole)
+			success, msg = WindowsShortcuts.open_shortcut(key)
+			if success:
+				self.status.setText(msg)
+				dlg.close()
+			else:
+				QMessageBox.warning(dlg, "错误", msg)
+		
+		list_widget.itemDoubleClicked.connect(open_shortcut)
+		layout.addWidget(list_widget)
+		
+		btn_layout = QHBoxLayout()
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addStretch()
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_color_info(self, color_info):
+		"""显示颜色信息"""
+		dlg = QDialog(self)
+		dlg.setWindowTitle("🎨 颜色信息")
+		dlg.resize(400, 350)
+		
+		layout = QVBoxLayout(dlg)
+		
+		# 颜色预览
+		from PySide6.QtWidgets import QFrame
+		color_preview = QFrame()
+		color_preview.setMinimumHeight(100)
+		color_preview.setStyleSheet(f"background-color: {color_info['hex']}; border: 2px solid #ccc;")
+		layout.addWidget(color_preview)
+		
+		# 颜色信息
+		info_text = f"""
+HEX:  {color_info['hex']}
+RGB:  {color_info['rgb']}
+RGBA: {color_info['rgba']}
+HSL:  {color_info['hsl']}
+
+R: {color_info['r']}
+G: {color_info['g']}
+B: {color_info['b']}
+		"""
+		
+		from PySide6.QtWidgets import QTextEdit
+		text_edit = QTextEdit()
+		text_edit.setPlainText(info_text.strip())
+		text_edit.setReadOnly(True)
+		layout.addWidget(text_edit)
+		
+		# 按钮
+		btn_layout = QHBoxLayout()
+		
+		btn_copy_hex = QPushButton("复制 HEX")
+		btn_copy_hex.clicked.connect(lambda: QApplication.clipboard().setText(color_info['hex']))
+		btn_layout.addWidget(btn_copy_hex)
+		
+		btn_copy_rgb = QPushButton("复制 RGB")
+		btn_copy_rgb.clicked.connect(lambda: QApplication.clipboard().setText(color_info['rgb']))
+		btn_layout.addWidget(btn_copy_rgb)
+		
+		btn_layout.addStretch()
+		
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addWidget(btn_close)
+		
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_content_search(self, pattern):
+		"""显示内容搜索对话框"""
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem, QProgressDialog
+		from PySide6.QtCore import QThread, Signal
+		
+		# 获取搜索范围
+		scope_text = self.combo_scope.currentText()
+		search_dir = None
+		
+		if scope_text == "C 盘":
+			search_dir = "C:\\"
+		elif scope_text == "D 盘":
+			search_dir = "D:\\"
+		elif scope_text.startswith("自定义:"):
+			search_dir = scope_text.split(":", 1)[1].strip()
+		else:
+			# 默认搜索用户目录
+			search_dir = os.path.expanduser("~")
+		
+		if not os.path.exists(search_dir):
+			QMessageBox.warning(self, "错误", f"搜索目录不存在: {search_dir}")
+			return
+		
+		# 创建对话框
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"📄 内容搜索: {pattern}")
+		dlg.resize(900, 600)
+		
+		layout = QVBoxLayout(dlg)
+		
+		info_label = QLabel(f"搜索目录: {search_dir}")
+		layout.addWidget(info_label)
+		
+		result_list = QListWidget()
+		layout.addWidget(result_list)
+		
+		btn_layout = QHBoxLayout()
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addStretch()
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		# 在后台线程中搜索
+		progress = QProgressDialog("正在搜索文件内容...", "取消", 0, 0, dlg)
+		progress.setWindowModality(Qt.WindowModal)
+		progress.show()
+		
+		class SearchThread(QThread):
+			results_ready = Signal(list)
+			
+			def __init__(self, engine, directory, pattern):
+				super().__init__()
+				self.engine = engine
+				self.directory = directory
+				self.pattern = pattern
+			
+			def run(self):
+				results = self.engine.search_in_directory(self.directory, self.pattern, recursive=True)
+				self.results_ready.emit(results)
+		
+		def on_results(results):
+			progress.close()
+			result_list.clear()
+			
+			for result in results[:100]:  # 最多显示100个文件
+				file_path = result['file_path']
+				match_count = result['match_count']
+				
+				item_text = f"{os.path.basename(file_path)} ({match_count} 处匹配)\n  {file_path}"
+				item = QListWidgetItem(item_text)
+				item.setData(Qt.UserRole, result)
+				result_list.addItem(item)
+			
+			if len(results) > 100:
+				result_list.addItem(f"... 还有 {len(results) - 100} 个结果")
+			
+			info_label.setText(f"搜索目录: {search_dir} | 找到 {len(results)} 个文件")
+		
+		def on_item_clicked(item):
+			result = item.data(Qt.UserRole)
+			if result:
+				# 显示匹配详情
+				details = f"文件: {result['file_path']}\n\n"
+				for match in result['matches'][:10]:
+					details += f"行 {match['line_number']}: {match['line_content']}\n"
+				QMessageBox.information(dlg, "匹配详情", details)
+		
+		result_list.itemDoubleClicked.connect(on_item_clicked)
+		
+		search_thread = SearchThread(self.content_search, search_dir, pattern)
+		search_thread.results_ready.connect(on_results)
+		search_thread.start()
+		
+		dlg.exec()
+	
+	def _show_document_search(self, pattern):
+		"""显示文档搜索对话框"""
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem, QProgressDialog
+		from PySide6.QtCore import QThread, Signal
+		
+		# 检查依赖
+		from filesearch.core.document_search import HAS_DOCX, HAS_OPENPYXL, HAS_PYPDF
+		
+		supported = []
+		if HAS_DOCX:
+			supported.append("Word")
+		if HAS_OPENPYXL:
+			supported.append("Excel")
+		if HAS_PYPDF:
+			supported.append("PDF")
+		
+		if not supported:
+			QMessageBox.warning(self, "缺少依赖", 
+				"未安装文档搜索依赖库\n\n请运行: pip install python-docx openpyxl pypdf")
+			return
+		
+		# 获取搜索范围
+		scope_text = self.combo_scope.currentText()
+		search_dir = None
+		
+		if scope_text == "C 盘":
+			search_dir = "C:\\"
+		elif scope_text == "D 盘":
+			search_dir = "D:\\"
+		elif scope_text.startswith("自定义:"):
+			search_dir = scope_text.split(":", 1)[1].strip()
+		else:
+			search_dir = os.path.expanduser("~\\Documents")  # 默认文档目录
+		
+		# 创建对话框
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"📋 文档搜索: {pattern}")
+		dlg.resize(900, 600)
+		
+		layout = QVBoxLayout(dlg)
+		
+		info_label = QLabel(f"搜索目录: {search_dir} | 支持: {', '.join(supported)}")
+		layout.addWidget(info_label)
+		
+		result_list = QListWidget()
+		layout.addWidget(result_list)
+		
+		btn_layout = QHBoxLayout()
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addStretch()
+		btn_layout.addWidget(btn_close)
+		layout.addLayout(btn_layout)
+		
+		# 收集文档文件
+		doc_files = []
+		for root, dirs, files in os.walk(search_dir):
+			for file in files:
+				ext = os.path.splitext(file)[1].lower()
+				if ext in ['.docx', '.xlsx', '.pdf']:
+					doc_files.append(os.path.join(root, file))
+			
+			if len(doc_files) > 500:  # 限制最多搜索500个文档
+				break
+		
+		if not doc_files:
+			QMessageBox.information(self, "提示", f"在 {search_dir} 中未找到文档文件")
+			dlg.close()
+			return
+		
+		# 在后台线程中搜索
+		progress = QProgressDialog("正在搜索文档内容...", "取消", 0, len(doc_files), dlg)
+		progress.setWindowModality(Qt.WindowModal)
+		progress.show()
+		
+		class SearchThread(QThread):
+			results_ready = Signal(list)
+			progress_update = Signal(int, int)
+			
+			def __init__(self, engine, files, pattern):
+				super().__init__()
+				self.engine = engine
+				self.files = files
+				self.pattern = pattern
+			
+			def run(self):
+				def progress_callback(current, total):
+					self.progress_update.emit(current, total)
+				
+				results = self.engine.search_in_documents(
+					self.files, self.pattern, progress_callback=progress_callback
+				)
+				self.results_ready.emit(results)
+		
+		def on_progress(current, total):
+			progress.setValue(current)
+		
+		def on_results(results):
+			progress.close()
+			result_list.clear()
+			
+			for result in results[:100]:
+				file_path = result['file_path']
+				match_count = result['match_count']
+				file_type = result['file_type']
+				
+				item_text = f"[{file_type}] {os.path.basename(file_path)} ({match_count} 处匹配)\n  {file_path}"
+				item = QListWidgetItem(item_text)
+				item.setData(Qt.UserRole, result)
+				result_list.addItem(item)
+			
+			if len(results) > 100:
+				result_list.addItem(f"... 还有 {len(results) - 100} 个结果")
+			
+			info_label.setText(f"搜索完成 | 找到 {len(results)} 个文档")
+		
+		def on_item_clicked(item):
+			result = item.data(Qt.UserRole)
+			if result:
+				details = f"文件: {result['file_path']}\n类型: {result['file_type']}\n\n"
+				for match in result['matches'][:10]:
+					details += f"行 {match['line_number']}: {match['line_content'][:100]}\n"
+				QMessageBox.information(dlg, "匹配详情", details)
+		
+		result_list.itemDoubleClicked.connect(on_item_clicked)
+		
+		search_thread = SearchThread(self.doc_search, doc_files, pattern)
+		search_thread.results_ready.connect(on_results)
+		search_thread.progress_update.connect(on_progress)
+		search_thread.start()
+		
+		dlg.exec()
+	
+	def _show_tag_search(self, tags_text):
+		"""显示标签搜索结果"""
+		tags = [t.strip().lower() for t in tags_text.split(',') if t.strip()]
+		
+		if not tags:
+			QMessageBox.warning(self, "提示", "请输入标签名（用逗号分隔）")
+			return
+		
+		files = self.tag_mgr.get_files_by_tags(tags, match_all=False)
+		
+		from PySide6.QtWidgets import QListWidget, QListWidgetItem
+		
+		dlg = QDialog(self)
+		dlg.setWindowTitle(f"🏷 标签搜索: {tags_text}")
+		dlg.resize(800, 600)
+		
+		layout = QVBoxLayout(dlg)
+		
+		info = QLabel(f"包含标签 {tags_text} 的文件 ({len(files)})")
+		layout.addWidget(info)
+		
+		result_list = QListWidget()
+		for file_path in files[:200]:
+			file_tags = self.tag_mgr.get_file_tags(file_path)
+			item_text = f"{os.path.basename(file_path)}\n  标签: {', '.join(file_tags)}\n  {file_path}"
+			item = QListWidgetItem(item_text)
+			item.setData(Qt.UserRole, file_path)
+			result_list.addItem(item)
+		
+		if len(files) > 200:
+			result_list.addItem(f"... 还有 {len(files) - 200} 个结果")
+		
+		def open_file(item):
+			file_path = item.data(Qt.UserRole)
+			if file_path and os.path.exists(file_path):
+				os.startfile(file_path)
+		
+		result_list.itemDoubleClicked.connect(open_file)
+		layout.addWidget(result_list)
+		
+		btn_layout = QHBoxLayout()
+		
+		btn_manage = QPushButton("🏷 管理标签")
+		btn_manage.clicked.connect(lambda: self._show_tag_manager([]))
+		btn_layout.addWidget(btn_manage)
+		
+		btn_layout.addStretch()
+		
+		btn_close = QPushButton("关闭")
+		btn_close.clicked.connect(dlg.close)
+		btn_layout.addWidget(btn_close)
+		
+		layout.addLayout(btn_layout)
+		
+		dlg.exec()
+	
+	def _show_tag_manager(self, selected_files=None):
+		"""显示标签管理器"""
+		if selected_files is None:
+			# 获取当前选中的文件
+			selected_files = []
+			selected_items = self._get_selected_items()
+			if selected_items:
+				selected_files = [item["fullpath"] for item in selected_items]
+		
+		dialog = TagManagerDialog(self, self.tag_mgr, selected_files)
+		dialog.exec()
+
+
 
 	# ==================== 关闭/退出 ====================
 	def closeEvent(self, event):  # noqa: N802
