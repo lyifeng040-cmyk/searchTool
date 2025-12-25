@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>API 测试</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        button { margin: 10px; padding: 10px 20px; font-size: 14px; }
+        #output { border: 1px solid #ccc; padding: 10px; margin-top: 20px; white-space: pre-wrap; max-height: 600px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Tauri API 测试</h1>
+    
+    <button onclick="testGetDrives()">测试获取驱动器</button>
+    <button onclick="testRealtimeSearch()">测试实时搜索</button>
+    <button onclick="testBuildIndex()">测试构建索引</button>
+    <button onclick="testIndexSearch()">测试索引搜索</button>
+    <button onclick="clearOutput()">清空输出</button>
+    
+    <div id="output"></div>
+    
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+        const output = document.getElementById('output');
+        
+        function log(msg) {
+            output.textContent += new Date().toLocaleTimeString() + ' - ' + msg + '\n';
+        }
+        
+        function clearOutput() {
+            output.textContent = '';
+        }
+        
+        async function testGetDrives() {
+            log('测试: 获取驱动器列表...');
+            try {
+                const drives = await invoke('get_all_drives');
+                log('成功: ' + JSON.stringify(drives));
+            } catch (error) {
+                log('错误: ' + error);
+            }
+        }
+        
+        async function testRealtimeSearch() {
+            log('测试: 实时搜索 "test" (限制 C 盘)...');
+            try {
+                const results = await invoke('realtime_search', { 
+                    query: 'test', 
+                    scope: 'C:/' 
+                });
+                log('成功: 找到 ' + results.length + ' 个结果');
+                if (results.length > 0) {
+                    log('示例结果: ' + JSON.stringify(results[0], null, 2));
+                }
+            } catch (error) {
+                log('错误: ' + error);
+            }
+        }
+        
+        async function testBuildIndex() {
+            log('测试: 构建 C 盘索引...');
+            try {
+                const result = await invoke('build_index', { scope: 'C:/' });
+                log('成功: ' + result);
+            } catch (error) {
+                log('错误: ' + error);
+            }
+        }
+        
+        async function testIndexSearch() {
+            log('测试: 索引搜索 "test"...');
+            try {
+                const results = await invoke('search_files', { 
+                    query: 'test', 
+                    scope: null 
+                });
+                log('成功: 找到 ' + results.length + ' 个结果');
+                if (results.length > 0) {
+                    log('示例结果: ' + JSON.stringify(results[0], null, 2));
+                }
+            } catch (error) {
+                log('错误: ' + error);
+            }
+        }
+        
+        log('API 测试页面已加载');
+    </script>
+</body>
+</html>

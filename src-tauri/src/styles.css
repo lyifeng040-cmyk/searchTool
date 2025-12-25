@@ -1,0 +1,231 @@
+:root {
+    --color-primary: #0B84FF;
+    --color-primary-dark: #0056C6;
+    --color-danger: #d32f2f;
+    --color-text: #333333;
+    --color-text-light: #666666;
+    --color-bg: #ffffff;
+    --color-bg-light: #f5f5f5;
+    --color-border: #e0e0e0;
+    --color-shadow: rgba(0, 0, 0, 0.08);
+    --color-shadow-deep: rgba(0, 0, 0, 0.12);
+    --border-radius: 16px;
+    --border-radius-lg: 28px;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: white;
+    color: var(--color-text);
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
+}
+
+/* 搜索头部 */
+.search-header {
+    padding: 16px;
+    background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 50%, #e8f1ff 100%);
+    border-bottom: 1px solid var(--color-border);
+    box-shadow: 0 2px 8px var(--color-shadow);
+}
+
+.search-input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.search-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    font-size: 14px;
+    background: white;
+    color: var(--color-text);
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.search-input:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(11, 132, 255, 0.1);
+    background: linear-gradient(135deg, #ffffff 0%, #f0f8ff 100%);
+}
+
+.search-input::placeholder {
+    color: #999999;
+}
+
+.search-mode-label {
+    font-size: 12px;
+    padding: 4px 10px;
+    background: var(--color-primary);
+    color: white;
+    border-radius: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.btn-delete {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--border-radius);
+    background: white;
+    color: var(--color-danger);
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.btn-delete:hover {
+    background: rgba(211, 47, 47, 0.08);
+    border-color: var(--color-danger);
+}
+
+.btn-delete:active {
+    background: rgba(211, 47, 47, 0.12);
+}
+
+.search-hints {
+    font-size: 12px;
+    color: var(--color-text-light);
+    margin-top: 8px;
+    padding: 0 4px;
+}
+
+/* 结果容器 */
+.results-container {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.results-list {
+    padding: 8px 0;
+}
+
+.result-item {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-bg-light);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.result-item:hover {
+    background: var(--color-bg-light);
+}
+
+.result-item.selected {
+    background: linear-gradient(135deg, rgba(11, 132, 255, 0.08) 0%, rgba(11, 132, 255, 0.04) 100%);
+    border-left: 3px solid var(--color-primary);
+    padding-left: 13px;
+}
+
+.result-icon {
+    font-size: 16px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.result-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.result-filename {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 搜索关键词高亮 */
+.result-filename mark {
+    background-color: #ffeb3b;
+    color: inherit;
+    font-weight: 600;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+.result-path {
+    font-size: 12px;
+    color: var(--color-text-light);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+.empty-state {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--color-text-light);
+    font-size: 14px;
+}
+
+/* 预览信息 */
+.preview-info {
+    padding: 10px 16px;
+    background: var(--color-bg-light);
+    border-top: 1px solid var(--color-border);
+    font-size: 12px;
+    color: var(--color-text-light);
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cccccc;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #999999;
+}
+
+/* 响应式 */
+@media (max-height: 200px) {
+    .search-hints {
+        display: none;
+    }
+}

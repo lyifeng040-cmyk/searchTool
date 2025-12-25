@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SearchTool - 文件搜索</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app" class="search-container">
+        <!-- 搜索框区域 -->
+        <div class="search-header">
+            <div class="search-input-group">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    class="search-input" 
+                    placeholder="搜索文件... (支持 dm:7d ext:pdf size:>10mb 等)"
+                    autocomplete="off"
+                />
+                <span class="search-mode-label" id="modeLabel">索引搜索</span>
+                <button id="deleteBtn" class="btn-delete" title="删除">🗑️</button>
+            </div>
+            <div class="search-hints">
+                ⌨️ Enter=搜索 | F5=刷新 | ↑↓=选择 | Ctrl+C=复制 | Ctrl+L=定位 | Delete=删除 | Esc=清空 | Ctrl+Alt+S=显示窗口
+            </div>
+        </div>
+
+        <!-- 搜索结果区域 -->
+        <div class="results-container">
+            <div id="resultsList" class="results-list">
+                <div class="empty-state">输入关键词开始搜索...</div>
+            </div>
+        </div>
+
+        <!-- 预览信息 -->
+        <div class="preview-info" id="previewInfo"></div>
+    </div>
+
+    <!-- Tauri API -->
+    <script>
+        window.__TAURI_INTERNALS__ = {};
+    </script>
+    <script src="tauri://api.js"></script>
+    <script src="main.js"></script>
+</body>
+</html>

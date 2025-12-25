@@ -1,0 +1,66 @@
+{
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devPath": "src-tauri/src",
+    "distDir": "src-tauri/src",
+    "withGlobalTauri": true
+  },
+  "package": {
+    "productName": "SearchTool",
+    "version": "1.0.0"
+  },
+  "tauri": {
+    "windows": [
+      {
+        "title": "极速文件搜索 V42 增强版",
+        "label": "main",
+        "url": "main_window.html",
+        "width": 1400,
+        "height": 900,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": false,
+        "decorations": true,
+        "alwaysOnTop": false
+      },
+      {
+        "title": "快速搜索",
+        "label": "mini",
+        "url": "mini_search.html",
+        "width": 600,
+        "height": 500,
+        "center": true,
+        "resizable": false,
+        "fullscreen": false,
+        "transparent": false,
+        "decorations": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "allowlist": {
+      "all": false,
+      "fs": {
+        "all": true
+      },
+      "shell": {
+        "all": true
+      },
+      "globalShortcut": {
+        "all": true
+      },
+      "window": {
+        "all": true
+      }
+    }
+  }
+}
+
+
+

@@ -1,0 +1,38 @@
+Asset `favicon.ico` not found; fallback to favicon.ico.html
+[2025-12-25T17:37:31Z INFO  filesearch::hotkey] ✅ 迷你窗口热键已注册: alt+space
+[2025-12-25T17:37:31Z INFO  filesearch::hotkey] ✅ 主窗口热键已注册: ctrl+shift+tab
+[2025-12-25T17:37:31Z INFO  filesearch] 🚀 启动索引预加载...
+[2025-12-25T17:37:31Z INFO  filesearch] 📂 检测到 5 个驱动器: ['C', 'D', 'E', 'F', 'G']
+Asset `favicon.ico` not found; fallback to favicon.ico.html
+[2025-12-25T17:37:31Z INFO  file_scanner_engine] ✅ 成功从磁盘加载索引: C:\.search_index.bin
+[2025-12-25T17:37:31Z INFO  filesearch] ✅ C 盘索引已加载到内存
+[2025-12-25T17:37:31Z INFO  file_scanner_engine] ✅ 成功从磁盘加载索引: D:\.search_index.bin
+[2025-12-25T17:37:31Z INFO  filesearch] ✅ D 盘索引已加载到内存
+[2025-12-25T17:37:31Z INFO  file_scanner_engine] ✅ 成功从磁盘加载索引: E:\.search_index.bin
+[2025-12-25T17:37:31Z INFO  filesearch] ✅ E 盘索引已加载到内存
+[2025-12-25T17:37:31Z INFO  file_scanner_engine] ✅ 成功从磁盘加载索引: F:\.search_index.bin
+[2025-12-25T17:37:31Z INFO  filesearch] ✅ F 盘索引已加载到内存
+[2025-12-25T17:37:31Z INFO  file_scanner_engine] ✅ 成功从磁盘加载索引: G:\.search_index.bin
+[2025-12-25T17:37:31Z INFO  filesearch] ✅ G 盘索引已加载到内存
+[2025-12-25T17:37:31Z INFO  filesearch] 🎉 所有索引加载完成，已常驻内存
+[2025-12-25T17:37:34Z INFO  file_scanner_engine::commands] 👁️ 启动文件监控: ["C:\\", "D:\\", "E:\\", "F:\\", "G:\\"]
+[2025-12-25T17:37:34Z INFO  file_scanner_engine::commands] 📊 G 盘初始 USN: 1849954080
+[2025-12-25T17:37:34Z INFO  file_scanner_engine::commands] 📊 D 盘初始 USN: 540682200
+[2025-12-25T17:37:34Z INFO  file_scanner_engine::commands] 📊 C 盘初始 USN: 12935068536
+[2025-12-25T17:37:34Z INFO  file_scanner_engine::commands] 📊 E 盘初始 USN: 818998704
+[2025-12-25T17:37:34Z INFO  file_scanner_engine::commands] 📊 F 盘初始 USN: 21931656
+[2025-12-25T17:37:40Z INFO  file_scanner_engine::commands] 📁 C 盘检测到 11 个文件变化
+[2025-12-25T17:37:40Z INFO  file_scanner_engine::commands] 📑 索引更新: +0 -0
+[2025-12-25T17:37:42Z INFO  file_scanner_engine::commands] 📁 C 盘检测到 3 个文件变化
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] 🔍 搜索: query='华润', scope=None
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] 📝 解析结果: 关键词='华润', 过滤器=SearchFilters { ext: [], size_min: 0, size_max: 0, date_after: None, path: "", name_pattern: "" }
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] 📂 将搜索 5 个驱动器: ["C:\\", "D:\\", "E:\\", "F:\\", "G:\\"]
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] ✓ 驱动器 C 索引已就绪
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] ✓ 驱动器 D 索引已就绪
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] ✓ 驱动器 E 索引已就绪
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] ✓ 驱动器 F 索引已就绪
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] ✓ 驱动器 G 索引已就绪
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] 🔎 开始在 C 盘搜索关键词 '华润'
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::commands] 执行包含搜索，最多返回 10000 个结果
+[2025-12-25T17:37:55Z INFO  file_scanner_engine::search_index] search_contains 开始: pattern='华润', max_results=10000
+[2025-12-25T17:38:03Z INFO  file_scanner_engine::commands] 📁 D 盘检测到 1 个文件变化

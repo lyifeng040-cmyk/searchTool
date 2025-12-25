@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>测试窗口</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            padding: 40px; 
+            background: #1e1e1e; 
+            color: #fff; 
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <h1>✅ 窗口已打开</h1>
+    <p>如果你能看到这个页面，说明 Tauri 窗口创建成功。</p>
+    
+    <div id="status">正在加载 Tauri API...</div>
+    
+    <script>
+        document.getElementById('status').textContent = 
+            window.__TAURI__ ? '✅ Tauri API 已加载' : '❌ Tauri API 未加载';
+    </script>
+</body>
+</html>

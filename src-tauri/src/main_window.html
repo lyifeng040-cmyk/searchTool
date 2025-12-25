@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>极速文件搜索 V42 增强版</title>
+    <link rel="stylesheet" href="main.css?v=20250102">
+</head>
+<body>
+    <div id="app" class="main-container">
+        <!-- 头部工具栏 -->
+        <div class="header">
+            <div class="title-bar">
+                <h1 class="title">⚡ 极速搜 V42 <span class="subtitle">🎯 增强版</span></h1>
+                <div class="status-group">
+                    <span id="indexStatus" class="index-status">检查中...</span>
+                    <button class="btn-icon" id="btnIndexMgr" title="索引管理">🔧</button>
+                    <button class="btn-primary" id="btnRebuildIndex" title="重建索引">🔄 重建索引</button>
+                    <button class="btn-icon" id="btnExport" title="导出">📤</button>
+                    <button class="btn-icon" id="btnBigFiles" title="大文件扫描">📊</button>
+                    <button class="btn-icon" id="btnSync" title="立即同步">🔄</button>
+                    <button class="btn-icon" id="btnToggleDebug" title="显示/隐藏调试面板">🐞</button>
+                </div>
+            </div>
+
+            <!-- 搜索控制栏 -->
+            <div class="search-controls">
+                <select id="scopeSelect" class="scope-select">
+                    <option value="all">所有磁盘 (全盘)</option>
+                </select>
+                
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    class="search-input-main" 
+                    placeholder="支持增强语法：dm:7d ext:pdf size:>10mb path:D:\ ..."
+                    autocomplete="off"
+                />
+                
+                <div class="search-options">
+                    <label><input type="checkbox" id="chkSimpleMode" checked> 简单模式</label>
+                    <label><input type="checkbox" id="chkRegex"> 正则</label>
+                    <label><input type="checkbox" id="chkRealtime"> 实时</label>
+                </div>
+                
+                <button id="btnSearch" class="btn-primary">🚀 搜索</button>
+                <button id="btnRefresh" class="btn-secondary" disabled>🔄 刷新</button>
+                <button id="btnStop" class="btn-secondary" disabled>⏹ 停止</button>
+            </div>
+
+            <!-- 筛选栏 -->
+            <div class="filter-bar">
+                <label>筛选:</label>
+                <label>格式
+                    <select id="filterExt" class="filter-select">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label>大小
+                    <select id="filterSize" class="filter-select">
+                        <option value="">不限</option>
+                        <option value=">1mb">>1MB</option>
+                        <option value=">10mb">>10MB</option>
+                        <option value=">100mb">>100MB</option>
+                        <option value=">500mb">>500MB</option>
+                        <option value=">1gb">>1GB</option>
+                    </select>
+                </label>
+                <label>时间
+                    <select id="filterDate" class="filter-select">
+                        <option value="">不限</option>
+                        <option value="1d">今天</option>
+                        <option value="3d">3天内</option>
+                        <option value="7d">7天内</option>
+                        <option value="30d">30天内</option>
+                        <option value="365d">今年</option>
+                    </select>
+                </label>
+                <button id="btnClearFilter" class="btn-small">清除</button>
+                <span id="filterStatus" class="filter-status"></span>
+            </div>
+        </div>
+
+        <!-- 主结果区域 -->
+        <div class="content">
+            <!-- 结果表格 -->
+            <div class="results-panel">
+                <div class="results-header">
+                    <span id="resultsCount" class="results-count">就绪</span>
+                    <div class="results-actions">
+                        <button class="btn-icon" id="btnSelectAll" title="全选">✅</button>
+                        <button class="btn-icon" id="btnCopyPath" title="复制路径">📋</button>
+                        <button class="btn-icon" id="btnLocate" title="定位文件">🎯</button>
+                        <button class="btn-icon" id="btnDelete" title="删除">🗑️</button>
+                    </div>
+                </div>
+                
+                <div class="results-table-wrapper">
+                <table id="resultsTable" class="results-table">
+                    <colgroup>
+                        <col class="col-select">
+                        <col class="col-filename">
+                        <col class="col-size">
+                        <col class="col-date">
+                        <col class="col-path">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th class="col-select"><input type="checkbox" id="chkSelectAll"></th>
+                            <th class="col-filename sortable" data-column="filename">文件名 ↕</th>
+                            <th class="col-size sortable" data-column="size">大小 ↕</th>
+                            <th class="col-date sortable" data-column="mtime">修改时间 ↕</th>
+                            <th class="col-path sortable" data-column="path">路径 ↕</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                        <tr class="empty-row">
+                            <td colspan="5" class="empty-state">输入关键词并等待结果（支持实时搜索）...</td>
+                        </tr>
+                    </tbody>
+                </table>
+                </div>
+
+                <!-- 分页控制 -->
+                <div class="pagination" id="pagination" style="display: none;">
+                    <button id="btnFirstPage" class="btn-page">⏮ 首页</button>
+                    <button id="btnPrevPage" class="btn-page">◀ 上一页</button>
+                    <span id="pageInfo" class="page-info">第 1 / 1 页</span>
+                    <button id="btnNextPage" class="btn-page">下一页 ▶</button>
+                    <button id="btnLastPage" class="btn-page">末页 ⏭</button>
+                    <label>每页
+                        <select id="pageSizeSelect" class="page-size-select">
+                            <option value="100">100</option>
+                            <option value="500" selected>500</option>
+                            <option value="1000">1000</option>
+                            <option value="5000">5000</option>
+                        </select>
+                    条</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- 状态栏 -->
+        <div class="statusbar">
+            <span id="statusText" class="status-text">就绪</span>
+            <div class="status-right">
+                <span id="statsText" class="stats-text"></span>
+                <progress id="progressBar" class="progress-bar" value="0" max="100" style="display: none;"></progress>
+            </div>
+        </div>
+        
+        <!-- 调试面板（默认隐藏，可用右上角虫子按钮打开） -->
+        <div id="debugPanel" style="display: none; position: fixed; bottom: 40px; left: 0; right: 0; background: #1e1e1e; color: #00ff00; padding: 10px; font-family: Consolas, monospace; font-size: 12px; border-top: 2px solid #00ff00; max-height: 150px; overflow-y: auto; z-index: 9999;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                <strong>🔍 流式调试面板 (实时显示事件)</strong>
+                <button onclick="document.getElementById('debugPanel').style.display='none'" style="background: #ff4444; color: white; border: none; padding: 2px 8px; cursor: pointer;">隐藏</button>
+            </div>
+            <div id="debugLog" style="font-size: 11px; line-height: 1.4;"></div>
+        </div>
+    </div>
+
+    <!-- Tauri API -->
+    <script src="main_window.js?v=20250102"></script>
+</body>
+</html>

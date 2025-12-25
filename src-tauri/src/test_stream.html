@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>流式搜索测试</title>
+    <style>
+        body {
+            font-family: "Microsoft YaHei", sans-serif;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #fff;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        input, button {
+            padding: 10px;
+            font-size: 14px;
+            margin: 5px;
+        }
+        #log {
+            background: #2d2d2d;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: "Consolas", monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            padding: 2px 0;
+            border-bottom: 1px solid #3d3d3d;
+        }
+        .stream { color: #4ec9b0; }
+        .error { color: #f48771; }
+        .success { color: #b5cea8; }
+    </style>
+</head>
+<body>
+    <h1>🧪 流式搜索测试</h1>
+    
+    <div class="controls">
+        <input type="text" id="query" placeholder="输入搜索条件，如：ext:txt" value="ext:txt">
+        <button onclick="testStream()">开始流式搜索</button>
+        <button onclick="clearLog()">清空日志</button>
+    </div>
+    
+    <div>
+        <strong>结果统计：</strong>
+        <span id="count">0</span> 个文件
+    </div>
+    
+    <h3>事件日志：</h3>
+    <div id="log"></div>
+
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+        const { listen } = window.__TAURI__.event;
+        
+        let totalCount = 0;
+        let batchCount = 0;
+        
+        // 设置流式监听器
+        (async () => {
+            try {
+                await listen('search-batch', (event) => {
+                    batchCount++;
+                    const batch = event.payload;
+                    totalCount += batch.length;
+                    
+                    addLog(`[批次 ${batchCount}] 收到 ${batch.length} 个结果，总计 ${totalCount}`, 'stream');
+                    document.getElementById('count').textContent = totalCount;
+                    
+                    // 显示前3个文件名
+                    if (batch.length > 0) {
+                        const samples = batch.slice(0, 3).map(r => r.filename).join(', ');
+                        addLog(`  示例: ${samples}`, 'stream');
+                    }
+                });
+                addLog('✅ 流式监听器已设置', 'success');
+            } catch (error) {
+                addLog('❌ 监听器设置失败: ' + error, 'error');
+            }
+        })();
+        
+        async function testStream() {
+            const query = document.getElementById('query').value.trim();
+            totalCount = 0;
+            batchCount = 0;
+            document.getElementById('count').textContent = '0';
+            
+            addLog(`🔍 开始搜索: "${query}"`, 'success');
+            
+            try {
+                const start = Date.now();
+                const results = await invoke('realtime_search', { 
+                    query,
+                    scope: null
+                });
+                const elapsed = ((Date.now() - start) / 1000).toFixed(2);
+                
+                addLog(`✅ 搜索完成: ${results.length} 个结果，耗时 ${elapsed}s`, 'success');
+                addLog(`📊 统计: 收到 ${batchCount} 个批次，共 ${totalCount} 个文件`, 'success');
+            } catch (error) {
+                addLog('❌ 搜索失败: ' + error, 'error');
+            }
+        }
+        
+        function addLog(message, type = '') {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            log.insertBefore(entry, log.firstChild);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            totalCount = 0;
+            batchCount = 0;
+            document.getElementById('count').textContent = '0';
+        }
+    </script>
+</body>
+</html>
