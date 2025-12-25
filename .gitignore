@@ -18,3 +18,8 @@ file_scanner_engine/
 *.tar
 *.tar.gz
 *.7z
+
+
+# Added by cargo
+
+/target
