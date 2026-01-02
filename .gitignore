@@ -1,6 +1,6 @@
 # Rust
 /target/
-/rust_project/target/
+SearchTool-rust/rust_project/
 **/*.rs.bk
 *.pdb
 
