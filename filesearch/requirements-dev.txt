@@ -1,0 +1,27 @@
+pytest>=7.0
+# psutil for process management
+psutil>=5.9.0
+# pywin32 for shortcuts and system integration (optional)
+pywin32>=300; platform_system == 'Windows'
+
+# ==================== 文档内容搜索依赖 ====================
+# Optional parsers for content indexing (install if you want PDF/DOCX parsing)
+
+# pypdf (推荐) - 现代化的 PDF 提取库
+pypdf>=4.0.0; python_version >= '3.8'
+
+# PyPDF2 (备选) - 经典 PDF 库
+# PyPDF2>=3.0; python_version >= '3.8'
+
+# pdfminer.six (备选) - 功能强大但较慢
+# pdfminer.six>=20221105
+
+# python-docx for Word .docx text extraction
+python-docx>=0.8.11
+
+# openpyxl for Excel .xlsx text extraction
+openpyxl>=3.0.0
+
+# python-pptx for PowerPoint .pptx text extraction
+python-pptx>=0.6.21
+

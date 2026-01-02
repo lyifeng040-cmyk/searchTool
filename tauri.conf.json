@@ -1,0 +1,90 @@
+{
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devPath": "ui",
+    "distDir": "ui"
+  },
+  "package": {
+    "productName": "filesearch",
+    "version": "2.0.0"
+  },
+  "tauri": {
+    "systemTray": {
+      "iconPath": "icons/icon.ico",
+      "iconAsTemplate": false
+    },
+    "allowlist": {
+      "all": false,
+      "shell": {
+        "all": false,
+        "open": true
+      },
+      "dialog": {
+        "all": true,
+        "open": true,
+        "save": true,
+        "message": true,
+        "ask": true,
+        "confirm": true
+      },
+      "fs": {
+        "all": true,
+        "scope": ["**"]
+      },
+      "window": {
+        "all": true,
+        "create": true,
+        "center": true,
+        "close": true,
+        "hide": true,
+        "maximize": true,
+        "minimize": true,
+        "setTitle": true,
+        "show": true
+      },
+      "app": {
+        "all": true
+      }
+    },
+    "bundle": {
+      "active": false,
+      "identifier": "com.filesearch.app"
+    },
+    "security": {
+      "csp": null
+    },
+    "updater": {
+      "active": false
+    },
+    "windows": [
+      {
+        "label": "main",
+        "fullscreen": false,
+        "height": 900,
+        "resizable": true,
+        "title": "🚀 极速文件搜索 V2.0",
+        "width": 1400,
+        "center": true,
+        "decorations": true,
+        "transparent": false,
+        "visible": true
+      },
+      {
+        "label": "mini",
+        "url": "mini.html",
+        "width": 720,
+        "height": 86,
+        "resizable": false,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "title": "搜索"
+      }
+    ]
+  }
+}
+

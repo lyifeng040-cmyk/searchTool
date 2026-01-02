@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>搜索</title>
+    <style>
+        :root {
+            --bg: rgba(0, 0, 0, 0);
+            --card: rgba(20, 24, 31, 0.86);
+            --card2: rgba(20, 24, 31, 0.72);
+            --border: rgba(255, 255, 255, 0.12);
+            --text: rgba(255, 255, 255, 0.92);
+            --muted: rgba(255, 255, 255, 0.58);
+            --accent: #4f9cff;
+            --danger: #ff4d4f;
+            --rowHover: rgba(255, 255, 255, 0.06);
+            --rowSel: rgba(79, 156, 255, 0.22);
+            --radius: 12px;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            width: 100%;
+            height: 100%;
+            background: var(--bg);
+            overflow: hidden;
+        }
+        body {
+            font-family: "Segoe UI", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
+        }
+        .frame {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, var(--card), var(--card2));
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+            backdrop-filter: blur(10px);
+        }
+        .search-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+        }
+        .search-icon {
+            width: 26px;
+            height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: var(--text);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .sort-badge {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            padding: 4px 8px;
+            border-radius: 999px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .sort-badge:hover {
+            background: rgba(255, 255, 255, 0.10);
+        }
+        #searchInput {
+            flex: 1;
+            padding: 8px 10px;
+            font-size: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            outline: none;
+            border-radius: 10px;
+        }
+        #searchInput:focus {
+            border-color: var(--accent);
+        }
+        #searchInput::placeholder {
+            color: var(--muted);
+        }
+        .close-btn {
+            width: 26px;
+            height: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            background: rgba(255, 255, 255, 0.06);
+            cursor: pointer;
+            user-select: none;
+            border-radius: 8px;
+        }
+        .close-btn:hover {
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.6);
+        }
+        .results-container {
+            display: none;
+            padding: 8px 12px 12px 12px;
+        }
+        .results-container.show {
+            display: block;
+        }
+        .results-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .result-list {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            max-height: 310px;
+            overflow-y: auto;
+            font-size: 12px;
+            border-radius: 10px;
+            flex: 1 1 auto;
+        }
+        .results-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.68);
+            padding: 0 2px;
+            user-select: none;
+        }
+        .result-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(36, 50, 70, 0.7);
+            background: transparent;
+        }
+        .result-item:hover {
+            background-color: var(--rowHover);
+        }
+        .result-item.selected {
+            background-color: var(--rowSel);
+            color: var(--text);
+        }
+        .result-item .name {
+            font-weight: 650;
+            color: var(--text);
+            line-height: 1.2;
+        }
+        .name-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .size {
+            font-size: 11px;
+            color: rgba(226, 232, 240, 0.72);
+            flex: 0 0 auto;
+        }
+        .result-item .path {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .result-item.selected .path {
+            color: rgba(226, 232, 240, 0.85);
+        }
+
+        /* 关键词高亮（mini） */
+        .hl {
+            background: rgba(255, 214, 10, 0.95);
+            color: #111;
+            padding: 0 1px;
+            border-radius: 2px;
+        }
+        .ctx-menu {
+            position: fixed;
+            z-index: 9999;
+            min-width: 160px;
+            background: rgba(20, 24, 31, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 10px;
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+            overflow: hidden;
+            padding: 6px;
+        }
+        .ctx-item {
+            padding: 9px 10px;
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.92);
+            cursor: pointer;
+            user-select: none;
+            font-size: 13px;
+        }
+        .ctx-item:hover {
+            background: rgba(79, 156, 255, 0.18);
+        }
+        .ctx-sep {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.08);
+            margin: 6px 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="frame">
+        <div class="search-bar">
+            <span class="search-icon" id="searchIcon">🔎</span>
+            <input type="text" id="searchInput" placeholder="输入关键词搜索..." autofocus>
+            <span class="sort-badge" id="sortBadge" title="Ctrl+S 切换排序">默认</span>
+            <span class="close-btn" id="closeBtn">✕</span>
+        </div>
+
+        <div class="results-container" id="resultsContainer">
+            <div class="results-wrap">
+                <div class="result-list" id="resultList"></div>
+                <div class="results-footer">
+                    <span id="miniResultCount">0</span>
+                    <span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!--
+      NOTE:
+      某些环境下 WebView 会对 `tauri://` 资源报 `ERR_UNKNOWN_URL_SCHEME`（噪音甚至导致 tauri.js 不加载）。
+      mini 窗口这里不依赖 tauri.js，通过 __TAURI_INVOKE__/__TAURI_IPC__ 等注入入口做兼容兜底。
+    -->
+    <script>
+        // 初始化 Tauri API
+        let invoke;
+        let listen;
+        let appWindow;
+
+        // 需求：mini 只保留一个框，不显示“就绪/状态”等额外文案
+
+        function resolveInvoke() {
+            const t = window.__TAURI__;
+            const candidates = [
+                t && t.invoke,
+                t && t.tauri && t.tauri.invoke,
+                t && t.core && t.core.invoke,
+                window.__TAURI_INVOKE__,
+                t && t.__TAURI_INVOKE__,
+                t && t.__internal && t.__internal.invoke,
+                t && t.ipc && (t.ipc.invoke || t.ipc.call),
+                t && t.__TAURI_IPC__ && t.__TAURI_IPC__.invoke,
+                // 额外兜底：部分版本只注入 __TAURI_IPC__
+                window.__TAURI_IPC__ && (window.__TAURI_IPC__.invoke || window.__TAURI_IPC__.call),
+            ];
+            for (const fn of candidates) {
+                if (typeof fn === 'function') return fn;
+            }
+            return null;
+        }
+
+        function resolveAppWindow() {
+            const t = window.__TAURI__;
+            const w = t && t.window;
+            // tauri.js 常见入口
+            if (w && w.appWindow) return w.appWindow;
+            if (w && typeof w.getCurrent === 'function') return w.getCurrent();
+            // 极端兜底
+            return null;
+        }
+
+        async function waitForTauriReady() {
+            // 等 tauri.js 注入/初始化（避免 DOMContentLoaded 早于 __TAURI__ 完整就绪）
+            for (let i = 0; i < 30; i++) {
+                invoke = resolveInvoke();
+                appWindow = resolveAppWindow();
+                if (typeof invoke === 'function') return true;
+                await new Promise(r => setTimeout(r, 50));
+            }
+            invoke = resolveInvoke();
+            appWindow = resolveAppWindow();
+            return typeof invoke === 'function';
+        }
+
+        async function initTauri() {
+            invoke = resolveInvoke();
+            listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+            appWindow = resolveAppWindow();
+        }
+
+        // mini：只做索引搜索（按需求去掉实时搜索）
+        let rawResults = [];
+        let currentResults = [];
+        let selectedIndex = -1;
+        let searchTimer = null;
+        let currentSortMode = 'default'; // default | size_desc | size_asc
+
+        function updateSortBadge() {
+            const el = document.getElementById('sortBadge');
+            if (!el) return;
+            if (currentSortMode === 'size_desc') el.textContent = '大小↓';
+            else if (currentSortMode === 'size_asc') el.textContent = '大小↑';
+            else el.textContent = '默认';
+        }
+
+        function sortMiniResults(list) {
+            const arr = Array.isArray(list) ? [...list] : [];
+            if (currentSortMode === 'default') return arr;
+
+            const isDir = (x) => !!(x && x.is_dir);
+            const size = (x) => {
+                const n = Number(x && x.size);
+                return Number.isFinite(n) ? n : 0;
+            };
+            const name = (x) => String((x && x.filename) || '');
+
+            arr.sort((a, b) => {
+                // 文件优先，目录靠后（目录 size 没意义）
+                const ad = isDir(a) ? 1 : 0;
+                const bd = isDir(b) ? 1 : 0;
+                if (ad !== bd) return ad - bd;
+
+                const sa = size(a);
+                const sb = size(b);
+                const ds = (currentSortMode === 'size_asc') ? (sa - sb) : (sb - sa);
+                if (ds !== 0) return ds;
+                return name(a).localeCompare(name(b), 'zh-CN', { sensitivity: 'base' });
+            });
+
+            return arr;
+        }
+
+        function cycleSortMode() {
+            if (currentSortMode === 'default') currentSortMode = 'size_desc';
+            else if (currentSortMode === 'size_desc') currentSortMode = 'size_asc';
+            else currentSortMode = 'default';
+            updateSortBadge();
+
+            // 只重排，不重新搜索
+            currentResults = sortMiniResults(rawResults);
+            if (currentResults.length > 0) displayResults(currentResults);
+        }
+
+        // 执行搜索
+        async function performSearch() {
+            const keyword = document.getElementById('searchInput').value.trim();
+            if (!keyword) {
+                rawResults = [];
+                currentResults = [];
+                hideResults();
+                return;
+            }
+
+            try {
+                if (typeof invoke !== 'function') {
+                    // 不弹状态文案；保持无响应会很困惑，所以给列表里放一行错误提示
+                    displayResults([], '初始化失败：invoke 不可用');
+                    return;
+                }
+
+                const t0 = performance.now();
+                const params = {
+                    keyword: keyword,
+                    scope: 'all',
+                    use_fts: true,
+                    use_regex: false,
+                    fuzzy: true,
+                    fuzzy_min_score: 0,
+                    limit: 200
+                };
+
+                const result = await invoke('search_files', { params });
+                const dt = Math.max(0, Math.round(performance.now() - t0));
+
+                rawResults = result.results || [];
+                currentResults = sortMiniResults(rawResults);
+                if (currentResults.length === 0) {
+                    // 无结果：直接收起，不显示额外文案
+                    hideResults();
+                } else {
+                    displayResults(currentResults);
+                    // 不显示“找到xx条”，但保留性能：如果你想要我可再加一个极淡的小角标
+                    void dt;
+                }
+            } catch (e) {
+                console.error('搜索失败:', e);
+                currentResults = [];
+                displayResults([], `搜索失败: ${String(e && (e.message || e) || 'unknown')}`);
+            }
+        }
+
+        // 显示搜索结果
+        function displayResults(results, message) {
+            const resultList = document.getElementById('resultList');
+            const resultsContainer = document.getElementById('resultsContainer');
+            const countEl = document.getElementById('miniResultCount');
+            const keyword = document.getElementById('searchInput')?.value || '';
+            const tokens = getHighlightTokens(keyword);
+
+            resultList.innerHTML = '';
+            selectedIndex = -1;
+
+            // 空结果也要给反馈（否则用户感觉“没反应”）
+            if (!results || results.length === 0) {
+                const div = document.createElement('div');
+                div.className = 'result-item selected';
+                div.innerHTML = `<div class="name">${escapeHtml(message || '无结果')}</div>`;
+                resultList.appendChild(div);
+                resultsContainer.classList.add('show');
+                resizeWindow(true);
+                if (countEl) countEl.textContent = '0';
+                return;
+            }
+
+            results.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'result-item';
+                div.dataset.index = index;
+
+                // 后端返回的是 FileRecord：full_path/filename/parent_dir
+                const fullPath = (item && (item.full_path || item.path)) || '';
+                const fileName =
+                    (item && item.filename) ||
+                    (fullPath ? fullPath.split(/[\\/]/).pop() : '(未知)');
+                const dirPath =
+                    (item && item.parent_dir) ||
+                    (fullPath ? fullPath.split(/[\\/]/).slice(0, -1).join('\\') : '');
+                const rawSize = (item && typeof item.size === 'number') ? item.size : 0;
+                const isDir = !!(item && item.is_dir);
+                const sizeText = isDir ? 'DIR' : (rawSize > 0 ? formatSizeBytes(rawSize) : '');
+
+                div.innerHTML = `
+                    <div class="name-row">
+                        <div class="name">${highlightHtml(fileName, tokens)}</div>
+                        <div class="size">${escapeHtml(sizeText)}</div>
+                    </div>
+                    <div class="path">${escapeHtml(dirPath)}</div>
+                `;
+
+                div.addEventListener('click', () => selectItem(index));
+                div.addEventListener('dblclick', () => openSelectedFile());
+                div.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    selectItem(index);
+                    showContextMenu(e.clientX, e.clientY);
+                });
+
+                resultList.appendChild(div);
+            });
+
+            resultsContainer.classList.add('show');
+            
+            // 调整窗口大小
+            resizeWindow(true);
+            // 默认选中第一条（保证 Enter 立即可用）
+            selectItem(0);
+            if (countEl) countEl.textContent = `共 ${results.length}`;
+        }
+
+        // 隐藏结果
+        function hideResults() {
+            document.getElementById('resultsContainer').classList.remove('show');
+            const countEl = document.getElementById('miniResultCount');
+            if (countEl) countEl.textContent = '0';
+            resizeWindow(false);
+        }
+
+        // 调整窗口大小
+        async function resizeWindow(expanded) {
+            try {
+                if (typeof invoke !== 'function') return;
+                await invoke('set_mini_expanded', { expanded: !!expanded });
+            } catch (e) {
+                console.error('调整窗口大小失败:', e);
+            }
+        }
+
+        // 选择项目
+        function selectItem(index) {
+            const items = document.querySelectorAll('.result-item');
+            items.forEach(item => item.classList.remove('selected'));
+            
+            if (index >= 0 && index < items.length) {
+                items[index].classList.add('selected');
+                selectedIndex = index;
+                items[index].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        // 打开选中的文件
+        async function openSelectedFile() {
+            if (selectedIndex >= 0 && selectedIndex < currentResults.length) {
+                const file = currentResults[selectedIndex];
+                try {
+                    const p = (file && (file.full_path || file.path)) || '';
+                    if (!p) return;
+                    await invoke('open_file', { path: p });
+                } catch (e) {
+                    console.error('打开文件失败:', e);
+                }
+            }
+        }
+
+        function hideContextMenu() {
+            const old = document.getElementById('ctxMenu');
+            if (old) old.remove();
+        }
+
+        function showContextMenu(x, y) {
+            hideContextMenu();
+            if (selectedIndex < 0 || selectedIndex >= currentResults.length) return;
+
+            const file = currentResults[selectedIndex];
+            const p = (file && (file.full_path || file.path)) || '';
+            if (!p) return;
+
+            const menu = document.createElement('div');
+            menu.id = 'ctxMenu';
+            menu.className = 'ctx-menu';
+            menu.style.left = `${x}px`;
+            menu.style.top = `${y}px`;
+
+            const mk = (text, fn) => {
+                const it = document.createElement('div');
+                it.className = 'ctx-item';
+                it.textContent = text;
+                it.addEventListener('click', async () => {
+                    hideContextMenu();
+                    await fn();
+                });
+                return it;
+            };
+
+            menu.appendChild(mk('打开', async () => {
+                if (typeof invoke === 'function') await invoke('open_file', { path: p });
+            }));
+            menu.appendChild(mk('定位文件', async () => {
+                if (typeof invoke === 'function') await invoke('reveal_in_folder', { path: p });
+            }));
+
+            const sep = document.createElement('div');
+            sep.className = 'ctx-sep';
+            menu.appendChild(sep);
+
+            menu.appendChild(mk('复制文件', async () => {
+                if (typeof invoke === 'function') await invoke('clipboard_copy_files', { paths: [p] });
+            }));
+            menu.appendChild(mk('剪切文件', async () => {
+                if (typeof invoke === 'function') await invoke('clipboard_cut_files', { paths: [p] });
+            }));
+
+            const sep2 = document.createElement('div');
+            sep2.className = 'ctx-sep';
+            menu.appendChild(sep2);
+            const sortLabel =
+                currentSortMode === 'size_desc' ? '按大小排序：大小↓（Ctrl+S）' :
+                currentSortMode === 'size_asc' ? '按大小排序：大小↑（Ctrl+S）' :
+                '按大小排序：默认（Ctrl+S）';
+            menu.appendChild(mk(sortLabel, async () => {
+                cycleSortMode();
+            }));
+
+            document.body.appendChild(menu);
+
+            // 出屏修正
+            const r = menu.getBoundingClientRect();
+            const nx = Math.min(x, window.innerWidth - r.width - 8);
+            const ny = Math.min(y, window.innerHeight - r.height - 8);
+            menu.style.left = `${Math.max(8, nx)}px`;
+            menu.style.top = `${Math.max(8, ny)}px`;
+        }
+
+        // 跳转到主窗口并传递结果
+        async function switchToMain() {
+            try {
+                const keyword = document.getElementById('searchInput').value.trim();
+                // 对齐 Python：Tab 要把“mini 当前结果”体现在主窗口
+                // 但直接通过事件传大数组容易失败，因此先把结果存到后端缓存，由主窗口主动拉取并渲染
+                await invoke('mini_prepare_transfer', {
+                    keyword: keyword,
+                    mode: 'index',
+                    results: currentResults || []
+                });
+                await invoke('show_main_only');
+            } catch (e) {
+                console.error('跳转主窗口失败:', e);
+            }
+        }
+
+        // 关闭窗口
+        async function closeWindow() {
+            try {
+                hideResults();
+                document.getElementById('searchInput').value = '';
+                if (typeof invoke === 'function') {
+                    await invoke('hide_mini');
+                }
+            } catch (e) {
+                console.error('关闭失败:', e);
+            }
+        }
+
+        // HTML 转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function escapeRegExp(s) {
+            return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        // 从“增强语法”里剥离真正需要高亮的 token（ext:/dm:/size:/name:/path:/is:）
+        function getHighlightTokens(query) {
+            const raw = String(query || '').trim();
+            if (!raw) return [];
+            const parts = raw.split(/\s+/).filter(Boolean);
+            const out = [];
+            for (const p of parts) {
+                const lower = p.toLowerCase();
+                if (
+                    lower.startsWith('ext:') ||
+                    lower.startsWith('dm:') ||
+                    lower.startsWith('size:') ||
+                    lower.startsWith('name:') ||
+                    lower.startsWith('path:') ||
+                    lower.startsWith('is:')
+                ) {
+                    continue;
+                }
+                out.push(p);
+            }
+            out.sort((a, b) => b.length - a.length);
+            return out.slice(0, 10);
+        }
+
+        function highlightHtml(text, tokens) {
+            const s = String(text ?? '');
+            if (!s) return '';
+            if (!tokens || tokens.length === 0) return escapeHtml(s);
+            const pat = tokens.map(escapeRegExp).join('|');
+            if (!pat) return escapeHtml(s);
+            const re = new RegExp(pat, 'gi');
+
+            let out = '';
+            let last = 0;
+            let m;
+            while ((m = re.exec(s)) !== null) {
+                const start = m.index;
+                const end = start + m[0].length;
+                if (start > last) out += escapeHtml(s.slice(last, start));
+                out += `<span class="hl">${escapeHtml(s.slice(start, end))}</span>`;
+                last = end;
+                if (re.lastIndex === start) re.lastIndex = start + 1;
+            }
+            if (last < s.length) out += escapeHtml(s.slice(last));
+            return out;
+        }
+
+        function formatSizeBytes(bytes) {
+            const n = Number(bytes);
+            if (!Number.isFinite(n) || n <= 0) return '';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let v = n;
+            let i = 0;
+            while (v >= 1024 && i < units.length - 1) {
+                v /= 1024;
+                i++;
+            }
+            const digits = (i === 0) ? 0 : (v >= 100 ? 0 : v >= 10 ? 1 : 2);
+            return `${v.toFixed(digits)} ${units[i]}`;
+        }
+
+        // 初始化事件监听
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initTauri();
+            await waitForTauriReady();
+
+            const searchInput = document.getElementById('searchInput');
+            const searchIcon = document.getElementById('searchIcon');
+            const closeBtn = document.getElementById('closeBtn');
+            const frame = document.querySelector('.frame');
+            const searchBar = document.querySelector('.search-bar');
+
+            // 边输边搜
+            searchInput.addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(performSearch, 300);
+            });
+
+            // 点击图标立即搜索
+            searchIcon.addEventListener('click', () => performSearch());
+
+            // 拖动：按下顶栏空白处即可拖动（不影响输入框编辑/关闭按钮）
+            const tryStartDrag = async (e) => {
+                if (e.button !== 0) return; // 左键
+                const t = e.target;
+                if (!t) return;
+                const id = t.id || '';
+                if (id === 'searchInput' || id === 'closeBtn' || id === 'sortBadge') return;
+                // 输入框内部也不触发
+                if (t.closest && t.closest('#searchInput')) return;
+                // 排序按钮也不触发拖动（否则会导致点击无效）
+                if (t.closest && t.closest('#sortBadge')) return;
+                try {
+                    if (typeof invoke === 'function') await invoke('start_drag_mini');
+                } catch (_) {}
+            };
+            // 优先顶栏可拖动
+            if (searchBar) searchBar.addEventListener('mousedown', tryStartDrag);
+            // 也允许在空白区域拖动（避免只能抓顶栏）
+            if (frame) frame.addEventListener('mousedown', (e) => {
+                // 在结果项上点击用于选择，不触发拖动
+                if (e.target && e.target.closest && e.target.closest('.result-item')) return;
+                tryStartDrag(e);
+            });
+
+            // 关闭
+            closeBtn.addEventListener('click', closeWindow);
+
+            // 点击空白关闭右键菜单
+            document.addEventListener('mousedown', (e) => {
+                const m = document.getElementById('ctxMenu');
+                if (m && !(e.target && e.target.closest && e.target.closest('#ctxMenu'))) {
+                    hideContextMenu();
+                }
+            });
+
+            // 键盘事件
+            document.addEventListener('keydown', async (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    await closeWindow();
+                } else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    await switchToMain();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    // Ctrl+Enter：定位文件（对齐主窗口/原 Python）
+                    if (e.ctrlKey) {
+                        const item = currentResults[selectedIndex];
+                        const p = item && (item.full_path || item.path);
+                        if (p && typeof invoke === 'function') {
+                            await invoke('reveal_in_folder', { path: p });
+                        }
+                    } else {
+                        await openSelectedFile();
+                    }
+                } else if ((e.key === 'c' || e.key === 'C') && e.ctrlKey) {
+                    // Ctrl+C：复制路径（文本）
+                    e.preventDefault();
+                    const item = currentResults[selectedIndex];
+                    const p = item && (item.full_path || item.path);
+                    if (p && typeof invoke === 'function') {
+                        await invoke('clipboard_set_text', { text: String(p) });
+                    }
+                } else if ((e.key === 'x' || e.key === 'X') && e.ctrlKey) {
+                    // Ctrl+X：剪切文件（资源管理器可粘贴）
+                    e.preventDefault();
+                    const item = currentResults[selectedIndex];
+                    const p = item && (item.full_path || item.path);
+                    if (p && typeof invoke === 'function') {
+                        await invoke('clipboard_cut_files', { paths: [String(p)] });
+                    }
+                } else if ((e.key === 's' || e.key === 'S') && e.ctrlKey) {
+                    // Ctrl+S：排序切换（默认 -> 大小↓ -> 大小↑）
+                    e.preventDefault();
+                    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+                    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+                    cycleSortMode();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (currentResults.length > 0) {
+                        const newIndex = (selectedIndex + 1) % currentResults.length;
+                        selectItem(newIndex);
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (currentResults.length > 0) {
+                        const newIndex = selectedIndex <= 0 ? currentResults.length - 1 : selectedIndex - 1;
+                        selectItem(newIndex);
+                    }
+                }
+            });
+
+            // 监听窗口显示事件，自动聚焦
+            if (listen) {
+                await listen('tauri://focus', () => {
+                    searchInput.focus();
+                    searchInput.select();
+                });
+            }
+
+            // 每次 hotkey 打开 mini，都重置状态（避免沿用上次关键词/结果条数）
+            if (listen) {
+                await listen('mini-opened', async () => {
+                    searchInput.value = '';
+                    rawResults = [];
+                    currentResults = [];
+                    selectedIndex = -1;
+                    hideResults();
+                    // 收起到默认高度
+                    if (typeof invoke === 'function') {
+                        await invoke('set_mini_expanded', { expanded: false });
+                    }
+                    searchInput.focus();
+                });
+            }
+
+            // 排序 badge 点击切换
+            const sortBadge = document.getElementById('sortBadge');
+            if (sortBadge) {
+                // 避免被顶栏拖动逻辑抢走
+                sortBadge.addEventListener('mousedown', (e) => {
+                    try { e.preventDefault(); } catch (_) {}
+                    try { e.stopPropagation(); } catch (_) {}
+                });
+                sortBadge.addEventListener('click', () => cycleSortMode());
+            }
+            updateSortBadge();
+        });
+    </script>
+</body>
+</html>

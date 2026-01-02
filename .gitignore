@@ -1,0 +1,55 @@
+# Rust
+/target/
+/rust_project/target/
+**/*.rs.bk
+*.pdb
+
+# Tauri
+/src-tauri/target/
+/src-tauri/WixTools/
+
+# Temp
+/.tmp_remote/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+
+# Config
+config.json
+.filesearch/
+
+# Build
+dist/
+build/
+*.exe
+*.msi
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+
+# Temporary
+*.tmp
+*.temp
+~*
+

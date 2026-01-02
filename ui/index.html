@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚀 极速文件搜索 V2.0</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="dialog.css">
+</head>
+<body>
+    <!-- 主容器 -->
+    <div class="app-container">
+        <!-- 头部区域 -->
+        <header class="app-header">
+            <div class="header-row">
+                <div class="title-section">
+                    <h1 class="app-title">⚡ 极速搜 V2.0</h1>
+                    <span class="app-subtitle">🎯 Rust重写版</span>
+                    <span id="indexStatus" class="index-status">检查中...</span>
+                    <span id="topResultCount" class="top-result-count">共 0 条</span>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="showIndexManager()">🔧 索引管理</button>
+                    <button class="btn btn-secondary" onclick="exportResults()">📤 导出</button>
+                    <button class="btn btn-secondary" onclick="scanLargeFiles()">📊 大文件</button>
+                    <select id="themeSelect" class="theme-select" onchange="changeTheme()">
+                        <option value="light">浅色</option>
+                        <option value="dark">深色</option>
+                    </select>
+                    <button class="btn btn-secondary" onclick="showCDriveSettings()">📂 C盘目录</button>
+                    <button class="btn btn-secondary" onclick="showBatchRename()">✏ 批量重命名</button>
+                    <button class="btn btn-primary" onclick="syncNow()">🔄 立即同步</button>
+                </div>
+            </div>
+
+            <!-- 搜索栏 -->
+            <div class="search-row">
+                <select id="favoriteSelect" class="favorite-select" onchange="onFavoriteSelect()">
+                    <option value="">⭐ 收藏</option>
+                </select>
+                <select id="scopeInput" class="scope-select" onchange="onScopeChange()">
+                    <option value="all">全部</option>
+                </select>
+                <button class="btn btn-secondary" onclick="browsePath()">📂 选择目录</button>
+                <input type="text" id="searchInput" class="search-input" placeholder="请输入搜索关键词..." />
+                <label class="checkbox-label">
+                    <input type="checkbox" id="fuzzyCheck" checked /> 模糊
+                </label>
+                <label class="checkbox-label" style="gap:8px">
+                    <span style="opacity:.85">阈值</span>
+                    <input id="fuzzyThreshold" type="range" min="0" max="100" step="5" value="0" style="width:120px"
+                           oninput="document.getElementById('fuzzyThresholdVal').textContent=this.value" />
+                    <span id="fuzzyThresholdVal" style="min-width:28px;text-align:right">0</span>
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="regexCheck" /> 正则
+                </label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="realtimeCheck" /> 实时
+                </label>
+                <button class="btn btn-primary btn-large" onclick="startSearch()">🚀 搜索</button>
+                <button class="btn btn-secondary" onclick="refreshSearch()" disabled id="refreshBtn">🔄 刷新</button>
+                <button class="btn btn-warning" onclick="togglePause()" disabled id="pauseBtn">⏸ 暂停</button>
+                <button class="btn btn-danger" onclick="stopSearch()" disabled id="stopBtn">⏹ 停止</button>
+            </div>
+
+            <!-- 筛选栏 -->
+            <div class="filter-row">
+                <span class="filter-label">筛选:</span>
+                <label class="filter-item">
+                    <span>格式</span>
+                    <select id="extFilter" class="filter-select" onchange="applyFilter()">
+                        <option value="">全部</option>
+                    </select>
+                </label>
+                <label class="filter-item">
+                    <span>大小</span>
+                    <select id="sizeFilter" class="filter-select" onchange="applyFilter()">
+                        <option value="">不限</option>
+                        <option value="1">1MB</option>
+                        <option value="10">>10MB</option>
+                        <option value="100">>100MB</option>
+                        <option value="500">>500MB</option>
+                        <option value="1000">>1GB</option>
+                    </select>
+                </label>
+                <label class="filter-item">
+                    <span>时间</span>
+                    <select id="dateFilter" class="filter-select" onchange="applyFilter()">
+                        <option value="">不限</option>
+                        <option value="1">今天</option>
+                        <option value="3">3天内</option>
+                        <option value="7">7天内</option>
+                        <option value="30">30天内</option>
+                        <option value="365">今年</option>
+                    </select>
+                </label>
+                <button class="btn btn-small" onclick="clearFilter()">清除</button>
+                <span id="filterInfo" class="filter-info"></span>
+            </div>
+        </header>
+
+        <!-- 结果区域 -->
+        <main class="results-container">
+            <div class="results-table-wrapper">
+                <table class="results-table" id="resultsTable">
+                    <colgroup>
+                        <col class="col-name" />
+                        <col class="col-dir" />
+                        <col class="col-size" />
+                        <col class="col-time" />
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th onclick="sortColumn(0)">📄 文件名</th>
+                            <th onclick="sortColumn(1)">📂 所在目录</th>
+                            <th onclick="sortColumn(2)">📊 大小/类型</th>
+                            <th onclick="sortColumn(3)">🕒 修改时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                        <tr>
+                            <td colspan="4" class="empty-message">
+                                <div class="welcome-message">
+                                    <h2>👋 欢迎使用极速文件搜索</h2>
+                                    <p>请在上方输入关键词开始搜索</p>
+                                    <p class="tip">💡 提示：支持模糊匹配、正则表达式、实时搜索</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 分页栏 -->
+            <div class="pagination-bar" id="paginationBar">
+                <button class="btn btn-small" onclick="goPage('first')" disabled id="firstBtn">⏮</button>
+                <button class="btn btn-small" onclick="goPage('prev')" disabled id="prevBtn">◀</button>
+                <span id="pageInfo" class="page-info">第 1 / 1 页</span>
+                <button class="btn btn-small" onclick="goPage('next')" disabled id="nextBtn">▶</button>
+                <button class="btn btn-small" onclick="goPage('last')" disabled id="lastBtn">⏭</button>
+                <span class="page-size-label">每页:</span>
+                <select id="pageSizeSelect" class="page-size-select" onchange="changePageSize()">
+                    <option value="200" selected>200</option>
+                    <option value="100">100</option>
+                    <option value="500">500</option>
+                    <option value="1000">1000</option>
+                    <option value="5000">5000</option>
+                </select>
+            </div>
+        </main>
+
+        <!-- 状态栏 -->
+        <footer class="status-bar">
+            <span id="statusText" class="status-text">就绪</span>
+            <span id="statusPath" class="status-path"></span>
+            <span id="resultCount" class="result-count"></span>
+        </footer>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div id="contextMenu" class="context-menu" style="display: none;">
+        <div class="menu-item" onclick="contextAction('open')">打开</div>
+        <div class="menu-item" onclick="contextAction('reveal')">定位文件</div>
+        <div class="menu-separator"></div>
+        <div class="menu-item" onclick="contextAction('copyPath')">复制路径</div>
+        <div class="menu-item" onclick="contextAction('copyName')">复制文件名</div>
+        <div class="menu-item" onclick="contextAction('copyDir')">复制目录</div>
+        <div class="menu-separator"></div>
+        <div class="menu-item" onclick="contextAction('copyFiles')">复制文件</div>
+        <div class="menu-item" onclick="contextAction('cutFiles')">剪切文件</div>
+        <div class="menu-separator"></div>
+        <div class="menu-item" onclick="contextAction('delete')">删除</div>
+        <div class="menu-separator"></div>
+        <div class="menu-item" onclick="contextAction('favorite')">添加收藏</div>
+    </div>
+
+    <!-- 索引管理对话框 -->
+    <div id="indexManagerDialog" class="dialog" style="display: none;">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h3>🔧 索引管理</h3>
+                <button class="dialog-close" onclick="closeDialog('indexManagerDialog')">×</button>
+            </div>
+            <div class="dialog-body">
+                <div class="index-stats">
+                    <p><strong>索引文件数：</strong><span id="indexFileCount">0</span></p>
+                    <p><strong>最后更新：</strong><span id="lastBuildTime">从未</span></p>
+                    <p><strong>构建耗时：</strong><span id="lastBuildCost">-</span></p>
+                </div>
+                <div class="dialog-actions">
+                    <button class="btn btn-primary" onclick="rebuildIndex()">🔄 重建索引</button>
+                    <button class="btn btn-warning" onclick="clearIndex()">🗑️ 清空索引</button>
+                    <button class="btn btn-secondary" onclick="closeDialog('indexManagerDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- C盘设置对话框 -->
+    <div id="cDriveDialog" class="dialog" style="display: none;">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h3>📂 C盘扫描目录设置</h3>
+                <button class="dialog-close" onclick="closeDialog('cDriveDialog')">×</button>
+            </div>
+            <div class="dialog-body">
+                <p class="dialog-hint">选择C盘需要扫描的目录（默认跳过系统目录）</p>
+                <div id="cDrivePathList" class="path-list"></div>
+                <div class="dialog-actions">
+                    <button class="btn btn-primary" onclick="saveCDrivePaths()">💾 保存</button>
+                    <button class="btn btn-secondary" onclick="closeDialog('cDriveDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 批量重命名对话框 -->
+    <div id="batchRenameDialog" class="dialog" style="display: none;">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h3>✏ 批量重命名</h3>
+                <button class="dialog-close" onclick="closeDialog('batchRenameDialog')">×</button>
+            </div>
+            <div class="dialog-body">
+                <p class="dialog-hint">已选择 <span id="renameFileCount">0</span> 个文件</p>
+                <div class="form-group">
+                    <label>查找：</label>
+                    <input type="text" id="renameFindText" class="form-input" placeholder="要替换的文本" />
+                </div>
+                <div class="form-group">
+                    <label>替换为：</label>
+                    <input type="text" id="renameReplaceText" class="form-input" placeholder="新文本" />
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="renameRegex" /> 使用正则表达式
+                    </label>
+                </div>
+                <div class="dialog-actions">
+                    <button class="btn btn-primary" onclick="executeBatchRename()">✅ 执行重命名</button>
+                    <button class="btn btn-secondary" onclick="closeDialog('batchRenameDialog')">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tauri JS API (必须先加载，否则 window.__TAURI__ 不完整 / invoke 不存在) -->
+    <script src="tauri://localhost/tauri.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+

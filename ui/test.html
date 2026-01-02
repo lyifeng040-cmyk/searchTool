@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>后端测试</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+        button { margin: 5px; padding: 10px 20px; font-size: 14px; cursor: pointer; }
+        #output { white-space: pre-wrap; background: #252526; padding: 15px; border-radius: 5px; margin-top: 20px; max-height: 600px; overflow-y: auto; }
+        .success { color: #4ec9b0; }
+        .error { color: #f48771; }
+        .info { color: #9cdcfe; }
+    </style>
+</head>
+<body>
+    <h2>🧪 后端功能测试</h2>
+    
+    <div>
+        <button onclick="testGetDrives()">1. 获取驱动器</button>
+        <button onclick="testGetIndexStats()">2. 获取索引状态</button>
+        <button onclick="testScanDrive()">3. 扫描C盘</button>
+        <button onclick="testIndexSearch()">4. 索引搜索 (test)</button>
+        <button onclick="testRealtimeSearch()">5. 实时搜索 (test)</button>
+        <button onclick="clearOutput()">清空输出</button>
+    </div>
+    
+    <div id="output"></div>
+    
+    <script>
+        const { invoke } = window.__TAURI__.tauri;
+        
+        function log(msg, type = 'info') {
+            const output = document.getElementById('output');
+            const time = new Date().toLocaleTimeString();
+            const className = type;
+            output.innerHTML += `<span class="${className}">[${time}] ${msg}</span>\n`;
+            output.scrollTop = output.scrollHeight;
+        }
+        
+        function clearOutput() {
+            document.getElementById('output').innerHTML = '';
+        }
+        
+        async function testGetDrives() {
+            try {
+                log('调用 get_drives...', 'info');
+                const drives = await invoke('get_drives');
+                log(`成功! 驱动器: ${JSON.stringify(drives)}`, 'success');
+            } catch (error) {
+                log(`失败: ${error}`, 'error');
+            }
+        }
+        
+        async function testGetIndexStats() {
+            try {
+                log('调用 get_index_stats...', 'info');
+                const stats = await invoke('get_index_stats');
+                log(`成功! 统计: ${JSON.stringify(stats, null, 2)}`, 'success');
+            } catch (error) {
+                log(`失败: ${error}`, 'error');
+            }
+        }
+        
+        async function testScanDrive() {
+            try {
+                log('调用 scan_drive (C:)...', 'info');
+                const count = await invoke('scan_drive', { drive: 'C:' });
+                log(`成功! 扫描了 ${count} 个文件`, 'success');
+            } catch (error) {
+                log(`失败: ${error}`, 'error');
+            }
+        }
+        
+        async function testIndexSearch() {
+            try {
+                log('调用 search_files (keyword: test)...', 'info');
+                const result = await invoke('search_files', {
+                    params: {
+                        keyword: 'test',
+                        scope: 'all',
+                        use_fts: false,
+                        use_regex: false,
+                        fuzzy: false,
+                        limit: 100
+                    }
+                });
+                log(`成功! 找到 ${result.total} 个结果，耗时 ${result.elapsed_ms}ms`, 'success');
+                if (result.results.length > 0) {
+                    log(`前3个结果: ${JSON.stringify(result.results.slice(0, 3), null, 2)}`, 'info');
+                }
+            } catch (error) {
+                log(`失败: ${error}`, 'error');
+            }
+        }
+        
+        async function testRealtimeSearch() {
+            try {
+                log('调用 search_realtime (keyword: test, scope: C:\\Users)...', 'info');
+                const result = await invoke('search_realtime', {
+                    params: {
+                        keyword: 'test',
+                        scope: 'C:\\Users',
+                        use_fts: false,
+                        use_regex: false,
+                        fuzzy: false,
+                        limit: 100
+                    }
+                });
+                log(`成功! 找到 ${result.total} 个结果，耗时 ${result.elapsed_ms}ms`, 'success');
+                if (result.results.length > 0) {
+                    log(`前3个结果: ${JSON.stringify(result.results.slice(0, 3), null, 2)}`, 'info');
+                }
+            } catch (error) {
+                log(`失败: ${error}`, 'error');
+            }
+        }
+        
+        log('测试页面已加载，点击按钮开始测试', 'info');
+    </script>
+</body>
+</html>
+
